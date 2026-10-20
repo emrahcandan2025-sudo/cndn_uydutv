@@ -99,7 +99,7 @@ class MainActivity : Activity() {
             layoutParams = FrameLayout.LayoutParams(-1, -1)
         }
         root.addView(playerView)
-        statusText = text("UyduTV · yayın kaynağı bekleniyor", 22, Color.WHITE, true).apply {
+        statusText = text("UyduTV · yayın kaynağı bekleniyor", 22f, Color.WHITE, true).apply {
             setBackgroundColor(Color.argb(190, 0, 0, 0)); setPadding(24)
             visibility = View.VISIBLE
         }
@@ -107,12 +107,12 @@ class MainActivity : Activity() {
         infoPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setPadding(26); setBackgroundColor(panel)
         }
-        infoTitle = text("", 28, Color.WHITE, true)
-        infoSubtitle = text("", 18, Color.LTGRAY, false)
+        infoTitle = text("", 28f, Color.WHITE, true)
+        infoSubtitle = text("", 18f, Color.LTGRAY, false)
         infoPanel.addView(infoTitle); infoPanel.addView(infoSubtitle)
         root.addView(infoPanel, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         guidePanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(28); setBackgroundColor(Color.argb(245, 8, 11, 16)); visibility = View.GONE }
-        guidePanel.addView(text("YAYIN REHBERİ   ·   OK: KANALA GEÇ   ·   BACK: KAPAT", 22, Color.WHITE, true))
+        guidePanel.addView(text("YAYIN REHBERİ   ·   OK: KANALA GEÇ   ·   BACK: KAPAT", 22f, Color.WHITE, true))
         val scroller = ScrollView(this)
         guideRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroller.addView(guideRows)
@@ -172,7 +172,7 @@ class MainActivity : Activity() {
         ChannelCatalog.channels.forEachIndexed { index, c ->
             val current = findProgram(c, now)?.title ?: "Canlı"
             val next = findNextProgram(c, now)?.title ?: "Program bilgisi yok"
-            val row = text(String.format(Locale.getDefault(), "%03d   %-20s   %s   →   %s", c.number, c.name, current, next), 20, Color.WHITE, index == channelIndex).apply {
+            val row = text(String.format(Locale.getDefault(), "%03d   %-20s   %s   →   %s", c.number, c.name, current, next), 20f, Color.WHITE, index == channelIndex).apply {
                 setPadding(18); isFocusable = true; isFocusableInTouchMode = true
                 setBackgroundColor(if (index == channelIndex) Color.rgb(48, 56, 70) else Color.TRANSPARENT)
                 setOnClickListener { channelIndex = index; closeGuide(); playCurrentChannel() }
