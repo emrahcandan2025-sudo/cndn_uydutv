@@ -1,0 +1,3 @@
+BUILD STATUS: SOURCE PROJECT ONLY
+
+No APK was generated in the preparation environment because Android SDK and Gradle are not installed and network access to fetch build tools is unavailable. Do not treat this archive as an already installable APK. Open the project in Android Studio, sync Gradle, and Build APK to produce app-debug.apk.
