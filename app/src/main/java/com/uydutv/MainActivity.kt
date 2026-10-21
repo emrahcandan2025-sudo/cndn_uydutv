@@ -91,7 +91,7 @@ class MainActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
         buildUi()
-        showSplash()
+        showIntro()
         player = ExoPlayer.Builder(this).build().also { exo ->
             playerView.player = exo
             exo.addListener(object : Player.Listener {
@@ -137,6 +137,51 @@ class MainActivity : Activity() {
             else -> statusText.text = "Hiçbir kanal oynatılamadı · bağlantınızı kontrol edin"
         }
         statusText.visibility = View.VISIBLE
+    }
+
+    private var introView: PlayerView? = null
+    private var introPlayer: ExoPlayer? = null
+    private val introTimeout = Runnable { finishIntro() }
+
+    /**
+     * Açılış videosu: app/src/main/res/raw/intro.mp4 varsa tam ekran oynatılır (kumandadan herhangi bir tuşla geçilir).
+     * Dosya yoksa eski logo animasyonu gösterilir.
+     */
+    private fun showIntro() {
+        val resId = resources.getIdentifier("intro", "raw", packageName)
+        if (resId == 0) { showSplash(); return }
+        player?.volume = 0f // video sırasında kanal sesi kapalı
+        val pv = PlayerView(this).apply {
+            useController = false
+            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+            setShutterBackgroundColor(Color.BLACK)
+            setBackgroundColor(Color.BLACK)
+            layoutParams = FrameLayout.LayoutParams(-1, -1)
+        }
+        val p = ExoPlayer.Builder(this).build()
+        pv.player = p
+        p.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) finishIntro()
+            }
+            override fun onPlayerError(error: PlaybackException) = finishIntro()
+        })
+        p.setMediaItem(MediaItem.fromUri("android.resource://$packageName/$resId"))
+        p.prepare()
+        p.playWhenReady = true
+        root.addView(pv)
+        introView = pv
+        introPlayer = p
+        handler.postDelayed(introTimeout, 20000) // güvenlik: en fazla 20 sn
+    }
+
+    private fun finishIntro() {
+        val pv = introView ?: return
+        handler.removeCallbacks(introTimeout)
+        introView = null
+        introPlayer?.release(); introPlayer = null
+        root.removeView(pv)
+        player?.volume = 1f
     }
 
     /** Açılış animasyonu: logo büyüyerek belirir, kısa süre kalır, sonra solarak kaybolur. */
@@ -412,6 +457,7 @@ class MainActivity : Activity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
+        if (introView != null) { finishIntro(); return true }
         if (guideVisible) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> { closeGuide(); return true }
@@ -453,6 +499,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         worker.shutdownNow()
+        introPlayer?.release(); introPlayer = null
         player?.release(); player = null
         super.onDestroy()
     }

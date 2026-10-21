@@ -86,3 +86,7 @@ GitHub → Settings → Secrets: `KEYSTORE_B64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS
 - Android TV uygulama başlangıcı: https://developer.android.com/training/tv/get-started/create
 - Media3 HLS oynatma: https://developer.android.com/media/media3/exoplayer/hls
 - Media3 sürümleri: https://developer.android.com/jetpack/androidx/releases/media3
+
+## Açılış videosu
+
+`app/src/main/res/raw/intro.mp4` dosyası varsa uygulama açılışında tam ekran oynatılır; kumandadan herhangi bir tuşla geçilir. Dosya yoksa logo animasyonu gösterilir. Dosya adı küçük harf olmalı (`intro.mp4`); kısa (5–10 sn), H.264/AAC ve 1080p ya da altında, mümkünse 10 MB altında olsun.
