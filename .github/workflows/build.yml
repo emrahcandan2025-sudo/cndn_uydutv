@@ -33,11 +33,11 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build debug APK
-        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - name: Build release APK
+        run: gradle --no-daemon --stacktrace :app:assembleRelease
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk UyduTV-debug.apk
+        run: cp app/build/outputs/apk/release/app-release.apk UyduTV-release.apk
 
       # Release dosyaları Actions artifact kotasından sayılmaz.
       - name: Publish GitHub Release
@@ -45,6 +45,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: UyduTV debug build ${{ github.run_number }}
-          prerelease: true
-          files: UyduTV-debug.apk
+          name: UyduTV release build ${{ github.run_number }}
+          prerelease: false
+          files: UyduTV-release.apk
