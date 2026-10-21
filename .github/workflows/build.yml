@@ -33,6 +33,9 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Restore signing key
+        run: base64 -d app/uydutv-release.jks.b64 > app/uydutv-release.jks
+
       - name: Build release APK
         run: gradle --no-daemon --stacktrace :app:assembleRelease
 
