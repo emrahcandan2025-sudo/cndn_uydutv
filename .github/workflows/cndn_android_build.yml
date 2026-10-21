@@ -1,19 +1,25 @@
 name: CNDN Android APK Derleme
 
 on:
-  push:
-    branches: [ main, master, 'cndn/**', 'release/**' ]
   workflow_dispatch:
     inputs:
       build_target:
         description: 'Derleme Hedefi'
         required: true
-        default: 'RELEASE_APK'
+        default: 'assembleDebug'
         type: choice
         options:
-          - DEBUG_APK
-          - RELEASE_APK
-          - BUNDLE_AAB
+          - assembleDebug
+          - assembleRelease
+          - bundleRelease
+      java_version:
+        description: 'Java JDK Sürümü'
+        required: true
+        default: '17'
+        type: choice
+        options:
+          - '17'
+          - '21'
 
 concurrency:
   group: cndn-build-${{ github.ref }}
@@ -21,7 +27,7 @@ concurrency:
 
 jobs:
   build:
-    name: Android Derleme (assembleRelease)
+    name: Android Derleme (assembleDebug)
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -69,10 +75,11 @@ jobs:
           fi
           ls -la debug.keystore || true
 
-      - name: Android Projesini Derle (assembleRelease)
+      - name: Android Projesini Derle (assembleDebug)
         id: gradle_build
         run: |
-          ./gradlew assembleRelease -Djava.awt.headless=true --stacktrace --no-daemon
+          TARGET="${{ inputs.build_target || 'assembleDebug' }}"
+          ./gradlew $TARGET -Djava.awt.headless=true --stacktrace --no-daemon
 
       - name: Derleme Çıktısını Kontrol Et
         if: success()
@@ -84,7 +91,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: cndn-apk-release
-          path: app/build/outputs/apk/release/*.apk
+          name: cndn-apk-debug
+          path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
           if-no-files-found: error
