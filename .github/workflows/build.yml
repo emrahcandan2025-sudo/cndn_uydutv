@@ -33,14 +33,26 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Restore signing key
-        run: base64 -d app/uydutv-release.jks.b64 > app/uydutv-release.jks
+      - name: Restore signing key (secrets tanımlıysa)
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          else
+            echo "KEYSTORE_B64 secret tanımlı değil; debug anahtarıyla imzalanacak."
+          fi
 
       - name: Build release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: gradle --no-daemon --stacktrace :app:assembleRelease
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk UyduTV-release.apk
+        run: cp app/build/outputs/apk/release/app-release.apk CNDN-TV.apk
 
       # Release dosyaları Actions artifact kotasından sayılmaz.
       - name: Publish GitHub Release
@@ -48,6 +60,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: UyduTV release build ${{ github.run_number }}
+          name: CNDN TV release build ${{ github.run_number }}
           prerelease: false
-          files: UyduTV-release.apk
+          files: CNDN-TV.apk

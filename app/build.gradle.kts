@@ -15,18 +15,23 @@ android {
         versionName = "1.0.0"
     }
 
+    // İmza bilgisi koda yazılmaz; CI/yerel ortamda ortam değişkeni olarak verilir.
+    // Verilmezse release derlemesi debug anahtarıyla imzalanır (kendi dağıtımınız için kendi anahtarınızı tanımlayın).
+    val keystorePath: String? = System.getenv("KEYSTORE_PATH")
     signingConfigs {
-        create("release") {
-            storeFile = file("uydutv-release.jks")
-            storePassword = "uydutv123"
-            keyAlias = "uydutv"
-            keyPassword = "uydutv123"
+        if (keystorePath != null && file(keystorePath).exists()) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

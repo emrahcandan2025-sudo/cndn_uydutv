@@ -31,7 +31,7 @@ object PlaylistLoader {
                             number = n, id = "pl$n", name = name!!, logoUrl = logo, streamUrl = line,
                             xmltvId = tvgId,
                             logoStatus = VerificationStatus.NOT_VERIFIED,
-                            streamStatus = VerificationStatus.VERIFIED,
+                            streamStatus = VerificationStatus.USER_PROVIDED,
                             epgStatus = VerificationStatus.NOT_VERIFIED,
                             notes = "Kullanıcı oynatma listesinden"
                         ))
@@ -40,7 +40,7 @@ object PlaylistLoader {
                 }
             }
         }
-        return out
+        return ChannelOrder.apply(out)
     }
 
     fun loadCached(ctx: Context): List<TvChannel>? = try {
@@ -52,7 +52,7 @@ object PlaylistLoader {
     fun download(ctx: Context): List<TvChannel>? = try {
         val conn = (URL(ChannelCatalog.PLAYLIST_URL).openConnection() as HttpURLConnection).apply {
             connectTimeout = 12000; readTimeout = 20000
-            setRequestProperty("User-Agent", "UyduTV/1.0 AndroidTV")
+            setRequestProperty("User-Agent", "CNDNTV/1.0 AndroidTV")
         }
         val text = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
         val list = parse(text)

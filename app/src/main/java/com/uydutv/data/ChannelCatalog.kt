@@ -1,17 +1,19 @@
 package com.uydutv.data
 
 /**
- * UyduTV fixed channel catalog.
+ * CNDN TV fixed channel catalog.
  *
  * IMPORTANT:
  * - officialLivePage is a broadcaster webpage, NOT a direct stream URL.
  * - streamUrl must remain null until the broadcaster/authorized distributor permits
  *   use in this app and the HLS/DASH endpoint has been technically verified.
  * - logoUrl and xmltvId remain null until verified from an authorized/actual source.
- * - Channel numbers are local UyduTV ordering, not official broadcaster numbers.
+ * - Channel numbers are local CNDN TV ordering, not official broadcaster numbers.
  */
 enum class VerificationStatus {
     VERIFIED,
+    /** Kullanıcının kendi seçtiği oynatma listesinden gelir; yayıncı izni/doğrulaması uygulama tarafından garanti edilmez. */
+    USER_PROVIDED,
     NOT_VERIFIED,
     PERMISSION_NOT_CONFIRMED,
     NOT_APPLICABLE
@@ -40,7 +42,7 @@ object ChannelCatalog {
      * Direct stream URLs, logos and XMLTV IDs are intentionally null until verified.
      */
     /** Varsayılan (yerleşik) liste. Oynatma listesi yüklenince `channels` onunla değiştirilir. */
-    val builtIn: List<TvChannel> = listOf(
+    private val builtInRaw: List<TvChannel> = listOf(
         TvChannel(1, "trt1", "TRT 1", officialLivePage = "https://www.trtizle.com/",
             notes = "Resmî TRT İzle giriş noktası; doğrudan akış ve uygulamada kullanım izni doğrulanmadı."),
         TvChannel(2, "trthaber", "TRT Haber", officialLivePage = "https://www.trtizle.com/",
@@ -65,6 +67,8 @@ object ChannelCatalog {
             notes = "Resmî canlı yayın sayfası; doğrudan akış ve uygulamada kullanım izni doğrulanmadı.")
     )
 
+    val builtIn: List<TvChannel> = ChannelOrder.apply(builtInRaw)
+
     @Volatile var channels: List<TvChannel> = builtIn
 
     /** Kullanıcının seçtiği M3U oynatma listesi. */
@@ -73,7 +77,10 @@ object ChannelCatalog {
     fun channelByNumber(number: Int): TvChannel? = channels.firstOrNull { it.number == number }
     fun channelById(id: String): TvChannel? = channels.firstOrNull { it.id == id }
 
-    /** Returns a playable URL only after stream authorization/verification is completed. */
+    /** Yalnızca doğrulanmış (VERIFIED) veya kullanıcının kendi listesinden gelen (USER_PROVIDED) akışlar oynatılır. */
     fun playableStream(channel: TvChannel): String? =
-        channel.streamUrl.takeIf { channel.streamStatus == VerificationStatus.VERIFIED }
+        channel.streamUrl?.takeIf {
+            it.isNotBlank() && (channel.streamStatus == VerificationStatus.VERIFIED ||
+                channel.streamStatus == VerificationStatus.USER_PROVIDED)
+        }
 }

@@ -1,6 +1,6 @@
-# UyduTV — Android TV starter project
+# CNDN TV — Android TV starter project
 
-Türkçe Android TV uygulaması için Kotlin/Media3 projesi. TV kumandası ile kanal zapping, numara girişi, EPG katmanı, son kanal hafızası, boşta katmanları gizleme ve oynatıcı hata durumunda yeniden deneme altyapısı içerir.
+Türkçe Android TV uygulaması için Kotlin/Media3 projesi. TV kumandası ile kanal zapping, numara girişi, EPG katmanı, son kanal hafızası, boşta katmanları gizleme ve oynatıcı hata durumunda yeniden deneme/atlama altyapısı içerir.
 
 ## Önemli yayın durumu
 
@@ -16,7 +16,7 @@ Bu ZIP **Android Studio proje kaynaklarını** içerir; derlenmiş APK içermez.
 ## APK oluşturma
 
 1. ZIP dosyasını açın.
-2. Android Studio'da `UyduTV` klasörünü **Open** ile açın.
+2. Android Studio'da `cndn_uydutv-main` klasörünü **Open** ile açın.
 3. Gradle senkronizasyonunun tamamlanmasını bekleyin.
 4. `Build > Build Bundle(s) / APK(s) > Build APK(s)` seçin.
 5. Debug APK yolu: `app/build/outputs/apk/debug/app-debug.apk`.
@@ -26,12 +26,12 @@ Komut satırından (Android SDK ve Gradle kuruluysa) proje kökünde `gradle ass
 
 ## Kontroller
 
-- `CH+` veya `↓`: sonraki kanal; `CH-` veya `↑`: önceki kanal
+- `CH+` veya `↓`: sonraki kanal; `CH-` veya `↑`: önceki kanal (kod ile uyumlu hale getirildi)
 - `0–9`: kanal numarası, yaklaşık 1,2 saniye sonra geçiş
 - `GUIDE` veya `G`: EPG katmanı
 - `INFO` veya `I`: bilgi bandı
 - `OK/ENTER`: bilgi bandı kapalıyken açar, açıkken rehberi açar
-- `BACK`: katmanı kapatır
+- `BACK`: açık katmanı kapatır; katman yoksa uygulamadan çıkar
 - `PLAY/PAUSE/REWIND/FAST_FORWARD`: zaman kaydırma açılmaz; canlı konum korunur
 - 5 saniye etkileşimsizlik: ekran katmanları kapanır
 
@@ -44,7 +44,28 @@ Katalog: `app/src/main/java/com/uydutv/data/ChannelCatalog.kt`
 - Resmî yayıncı sayfaları, referans sayfası olarak tutulur.
 - XMLTV aday kaynağı: `https://iptv-epg.org/files/epg-tr.xml`
 - EPG verisi yalnızca `xmltvId` ile birebir eşleşen kanallara atanır. Katalogdaki EPG ID'leri doğrulanana kadar boş olduğundan “Canlı” gösterilir.
-- Akış adresi eklemek için yayıncı/yetkili dağıtıcı iznini alın, HLS/DASH adresini Android TV cihazında test edin ve `streamStatus = VERIFIED` olarak işaretleyin. Yalnızca `ChannelCatalog.playableStream()` tarafından doğrulanmış akışlar oynatılır.
+- Akış adresi eklemek için yayıncı/yetkili dağıtıcı iznini alın, HLS/DASH adresini Android TV cihazında test edin ve `streamStatus = VERIFIED` olarak işaretleyin. `ChannelCatalog.playableStream()` yalnızca `VERIFIED` (siz doğruladıysanız) veya `USER_PROVIDED` (kendi seçtiğiniz oynatma listesinden gelen) akışları oynatır.
+
+## Oynatma listesi (M3U)
+
+Uygulama açılışta `ChannelCatalog.PLAYLIST_URL` adresindeki M3U listesini indirir, diske kaydeder ve kanalları `USER_PROVIDED` olarak işaretler. Bu listeler topluluk tarafından derlenir; yayıncı izni, erişilebilirlik veya coğrafi kısıt garantisi **yoktur**. Listeyi kullanma ve uygulamayı dağıtma sorumluluğu size aittir. Kendi/izinli bir liste kullanmak için `PLAYLIST_URL` değerini değiştirin.
+
+## Kanal sırası
+
+Kanal sırası ve numaraları `app/src/main/java/com/uydutv/data/ChannelOrder.kt` içindeki `slots` listesinden gelir (TV'deki numaralar boşluklarıyla korunur). Playlist kanalları adlarına göre eşleştirilir; Türkçe harf, boşluk ve HD eki farkı önemsenmez. Listede olmayan kanallar sona eklenir (`KEEP_UNMATCHED = false` ile gizlenir). Sıra değiştirmek için `slots` satırlarını düzenleyin.
+
+## İmzalama (release)
+
+Anahtar ve şifreler artık repoda tutulmaz. `app/build.gradle.kts` bunları ortam değişkenlerinden okur: `KEYSTORE_PATH`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`. Tanımlı değilse release APK debug anahtarıyla imzalanır.
+
+Kendi anahtarınızı üretin:
+
+```
+keytool -genkeypair -v -keystore release.jks -alias cndntv -keyalg RSA -keysize 2048 -validity 10000
+base64 -w0 release.jks   # çıktıyı GitHub secret olarak ekleyin
+```
+
+GitHub → Settings → Secrets: `KEYSTORE_B64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`. Daha önce paylaşılan eski `uydutv-release.jks` ve `uydutv123` şifresi ele geçmiş sayılmalı; kullanmayın.
 
 ## Dahil edilen işlevler ve bilinen sınırlar
 
@@ -55,7 +76,9 @@ Katalog: `app/src/main/java/com/uydutv/data/ChannelCatalog.kt`
 - Oynatıcı hata durumunda 3 saniyede yeniden deneme
 - Basit kısa statik/parazit hissi için kanal değişiminde geçiş
 - Logo görselleri ve doğrudan yayın URL'leri henüz doğrulanmadı
-- EPG önbelleği diske kaydedilmiyor; indirme başarısızsa programlar “Canlı” olarak gösterilir
+- EPG yalnızca katalogdaki `xmltvId` ile eşleşen kanallar için belleğe alınır; diske kaydedilmez. İndirme başarısızsa programlar “Canlı” gösterilir ve sonraki liste yenilemesinde yeniden denenir
+- Oynatma hatasında aynı kanal 3 kez denenir, olmazsa sonraki kanala geçilir (hepsi başarısızsa durur)
+- Gradle wrapper dahil değil: Android Studio kullanın veya `gradle wrapper` ile üretin
 - APK gerçek Android TV cihazında test edilmedi
 
 ## Resmî teknik referanslar

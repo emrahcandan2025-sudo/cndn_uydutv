@@ -7,7 +7,7 @@
     <application
         android:allowBackup="false"
         android:usesCleartextTraffic="true"
-        android:label="UyduTV"
+        android:label="CNDN TV"
         android:icon="@drawable/ic_utv"
         android:banner="@drawable/tv_banner"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
