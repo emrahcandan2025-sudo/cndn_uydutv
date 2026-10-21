@@ -30,7 +30,7 @@ Komut satırından (Android SDK ve Gradle kuruluysa) proje kökünde `gradle ass
 - `0–9`: kanal numarası, yaklaşık 1,2 saniye sonra geçiş
 - `GUIDE` veya `G`: EPG katmanı
 - `INFO` veya `I`: bilgi bandı
-- `OK/ENTER`: bilgi bandı kapalıyken açar, açıkken rehberi açar
+- `OK/ENTER`: 1 kez = kanal bilgisi; 2 kez (2 sn içinde) = solda kanal listesi, sağda seçili kanalın önizlemesi. Listede ◂/▸ ile kategori (Tüm Kanallar, Genel, Haber, Spor, Film, Çocuk, Müzik, Belgesel…) değiştirilir, ↑/↓ ile gezilir (kanal ~0,5 sn sonra sağda önizlenir), `OK` seçili kanalda tam ekrana geçer, `GERİ` önceki kanala döner
 - `BACK`: açık katmanı kapatır; katman yoksa uygulamadan çıkar
 - `PLAY/PAUSE/REWIND/FAST_FORWARD`: zaman kaydırma açılmaz; canlı konum korunur
 - 5 saniye etkileşimsizlik: ekran katmanları kapanır
@@ -90,3 +90,7 @@ GitHub → Settings → Secrets: `KEYSTORE_B64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS
 ## Açılış videosu
 
 `app/src/main/res/raw/intro.mp4` dosyası varsa uygulama açılışında tam ekran oynatılır; kumandadan herhangi bir tuşla geçilir. Dosya yoksa logo animasyonu gösterilir. Dosya adı küçük harf olmalı (`intro.mp4`); kısa (5–10 sn), H.264/AAC ve 1080p ya da altında, mümkünse 10 MB altında olsun.
+
+## Oynatma listeleri
+
+Uygulama iki iptv-org listesini indirip birleştirir (aynı akış adresi tekrar edilmez): `countries/tr.m3u` (Türkiye) ve `languages/tur.m3u` (Türkçe yayın yapanlar). Kategori menüsü, listelerin `group-title` bilgisinden otomatik oluşur. Listeler `ChannelCatalog.PLAYLIST_URLS` içindedir.

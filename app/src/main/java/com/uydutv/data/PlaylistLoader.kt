@@ -15,6 +15,8 @@ object PlaylistLoader {
         var name: String? = null
         var tvgId: String? = null
         var logo: String? = null
+        var groups: List<String> = emptyList()
+        val seen = HashSet<String>()
         for (raw in text.lineSequence()) {
             val line = raw.trim()
             when {
@@ -22,18 +24,20 @@ object PlaylistLoader {
                     val attrs = attr.findAll(line).associate { it.groupValues[1].lowercase() to it.groupValues[2] }
                     tvgId = attrs["tvg-id"]?.takeIf { it.isNotBlank() }
                     logo = attrs["tvg-logo"]?.takeIf { it.isNotBlank() }
+                    groups = (attrs["group-title"] ?: "").split(";").map { it.trim() }.filter { it.isNotEmpty() }
                     name = line.substringAfterLast(",", "").trim().ifBlank { attrs["tvg-name"] ?: "Kanal" }
                 }
                 line.isNotEmpty() && !line.startsWith("#") && name != null -> {
-                    if (line.startsWith("http://") || line.startsWith("https://")) {
+                    if ((line.startsWith("http://") || line.startsWith("https://")) && seen.add(line)) {
                         val n = out.size + 1
                         out.add(TvChannel(
-                            number = n, id = "pl$n", name = name!!, logoUrl = logo, streamUrl = line,
+                            number = n, id = "pl${line.hashCode()}", name = name!!, logoUrl = logo, streamUrl = line,
                             xmltvId = tvgId,
                             logoStatus = VerificationStatus.NOT_VERIFIED,
                             streamStatus = VerificationStatus.USER_PROVIDED,
                             epgStatus = VerificationStatus.NOT_VERIFIED,
-                            notes = "Kullanıcı oynatma listesinden"
+                            notes = "Kullanıcı oynatma listesinden",
+                            groups = groups
                         ))
                     }
                     name = null; tvgId = null; logo = null
@@ -48,15 +52,24 @@ object PlaylistLoader {
         if (f.exists()) parse(f.readText()).takeIf { it.isNotEmpty() } else null
     } catch (_: Exception) { null }
 
-    /** Ağ iş parçacığında çağrılmalı. Başarısızsa null döner. */
-    fun download(ctx: Context): List<TvChannel>? = try {
-        val conn = (URL(ChannelCatalog.PLAYLIST_URL).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 12000; readTimeout = 20000
-            setRequestProperty("User-Agent", "CNDNTV/1.0 AndroidTV")
+    /** Ağ iş parçacığında çağrılmalı. Listelerden biri bile inerse sonuç döner; hiçbiri inmezse null. */
+    fun download(ctx: Context): List<TvChannel>? {
+        val texts = mutableListOf<String>()
+        for (u in ChannelCatalog.PLAYLIST_URLS) {
+            try {
+                val conn = (URL(u).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 12000; readTimeout = 20000
+                    setRequestProperty("User-Agent", "CNDNTV/1.0 AndroidTV")
+                }
+                try { texts += conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() } }
+                finally { conn.disconnect() }
+            } catch (_: Exception) { /* bu kaynak atlanır */ }
         }
-        val text = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-        val list = parse(text)
-        if (list.isNotEmpty()) File(ctx.filesDir, CACHE_FILE).writeText(text)
-        list.takeIf { it.isNotEmpty() }
-    } catch (_: Exception) { null }
+        if (texts.isEmpty()) return null
+        val joined = texts.joinToString("\n")
+        val list = parse(joined)
+        if (list.isEmpty()) return null
+        try { File(ctx.filesDir, CACHE_FILE).writeText(joined) } catch (_: Exception) { }
+        return list
+    }
 }

@@ -6,9 +6,11 @@ import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.TextureView
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
@@ -21,7 +23,12 @@ import androidx.core.view.setPadding
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.uydutv.data.ChannelCatalog
@@ -74,6 +81,15 @@ class MainActivity : Activity() {
     }
     private val changeRunnable = Runnable { flash.visibility = View.GONE; playCurrentChannel() }
 
+    // Bölünmüş ekran (sol: kanal listesi, sağ: önizleme)
+    private var loadedId: String? = null       // şu an oynatıcıya yüklenmiş kanalın kimliği
+    private var guideOriginId: String? = null  // liste açılmadan önce izlenen kanal (GERİ ile dönülür)
+    private lateinit var guideTitle: TextView
+    private var lastOkAt = 0L
+    private val previewRunnable = Runnable {
+        if (guideVisible && channelIndex in ChannelCatalog.channels.indices && currentChannel.id != loadedId) { skipChain = 0; playCurrentChannel() }
+    }
+
     private val bg = Color.rgb(8, 10, 14)
     private val panel = Color.argb(225, 12, 16, 23)
     private val accent = Color.rgb(239, 68, 68)
@@ -91,8 +107,7 @@ class MainActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
         buildUi()
-        showIntro()
-        player = ExoPlayer.Builder(this).build().also { exo ->
+        player = buildPlayer().also { exo ->
             playerView.player = exo
             exo.addListener(object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) = handlePlayerError()
@@ -109,13 +124,29 @@ class MainActivity : Activity() {
                 }
             })
         }
-        PlaylistLoader.loadCached(this)?.let { ChannelCatalog.channels = it }
+        showIntro() // oynatıcı hazır olduktan sonra: kanal sesi video sırasında kapatılabilsin
+        PlaylistLoader.loadCached(this)?.let { ChannelCatalog.setAll(it) }
         val saved = getSharedPreferences("uydutv", MODE_PRIVATE).getInt("last_channel", 1)
         channelIndex = ChannelCatalog.channels.indexOfFirst { it.number == saved }.coerceAtLeast(0)
         playCurrentChannel()
         refreshPlaylist()
         loadEpg()
         resetIdleTimer()
+    }
+
+    /** Yüksek görüntü kalitesi: her zaman mevcut en yüksek çözünürlük/bit hızı, yüksek başlangıç bant genişliği tahmini, geniş tampon. */
+    private fun buildPlayer(): ExoPlayer {
+        val selector = DefaultTrackSelector(this).also {
+            it.setParameters(it.buildUponParameters().setForceHighestSupportedBitrate(true))
+        }
+        val meter = DefaultBandwidthMeter.Builder(this).setInitialBitrateEstimate(30_000_000L).build()
+        val load = DefaultLoadControl.Builder().setBufferDurationsMs(15_000, 40_000, 2_000, 4_000).build()
+        val renderers = DefaultRenderersFactory(this).setEnableDecoderFallback(true)
+        return ExoPlayer.Builder(this, renderers)
+            .setTrackSelector(selector)
+            .setBandwidthMeter(meter)
+            .setLoadControl(load)
+            .build()
     }
 
     /** Hata sonrası: 3 kez aynı kanalı dene, olmazsa sonraki kanala geç; hepsi başarısızsa dur. */
@@ -139,38 +170,45 @@ class MainActivity : Activity() {
         statusText.visibility = View.VISIBLE
     }
 
-    private var introView: PlayerView? = null
+    private var introView: View? = null
     private var introPlayer: ExoPlayer? = null
     private val introTimeout = Runnable { finishIntro() }
 
     /**
      * Açılış videosu: app/src/main/res/raw/intro.mp4 varsa tam ekran oynatılır (kumandadan herhangi bir tuşla geçilir).
-     * Dosya yoksa eski logo animasyonu gösterilir.
+     * Dosya yoksa ya da video oynatılamazsa logo animasyonu gösterilir.
+     * Video, kanal görüntüsünün (SurfaceView) her zaman ÜSTÜNDE görünsün diye TextureView üzerinde oynatılır.
      */
     private fun showIntro() {
         val resId = resources.getIdentifier("intro", "raw", packageName)
         if (resId == 0) { showSplash(); return }
         player?.volume = 0f // video sırasında kanal sesi kapalı
-        val pv = PlayerView(this).apply {
-            useController = false
-            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-            setShutterBackgroundColor(Color.BLACK)
-            setBackgroundColor(Color.BLACK)
-            layoutParams = FrameLayout.LayoutParams(-1, -1)
-        }
+        val box = FrameLayout(this).apply { setBackgroundColor(Color.BLACK); isClickable = true }
+        val tv = TextureView(this)
+        box.addView(tv, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
         val p = ExoPlayer.Builder(this).build()
-        pv.player = p
+        p.setVideoTextureView(tv)
         p.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) finishIntro()
             }
-            override fun onPlayerError(error: PlaybackException) = finishIntro()
+            override fun onPlayerError(error: PlaybackException) {
+                finishIntro(); showSplash() // video açılamazsa logo animasyonuna dön
+            }
+            override fun onVideoSizeChanged(size: VideoSize) {
+                val rw = root.width; val rh = root.height
+                if (size.width <= 0 || size.height <= 0 || rw <= 0 || rh <= 0) return
+                val aspect = size.width * size.pixelWidthHeightRatio / size.height
+                var w = rw; var h = (rw / aspect).toInt()
+                if (h > rh) { h = rh; w = (rh * aspect).toInt() }
+                tv.layoutParams = FrameLayout.LayoutParams(w, h, Gravity.CENTER)
+            }
         })
         p.setMediaItem(MediaItem.fromUri("android.resource://$packageName/$resId"))
         p.prepare()
         p.playWhenReady = true
-        root.addView(pv)
-        introView = pv
+        root.addView(box, FrameLayout.LayoutParams(-1, -1))
+        introView = box
         introPlayer = p
         handler.postDelayed(introTimeout, 20000) // güvenlik: en fazla 20 sn
     }
@@ -231,9 +269,11 @@ class MainActivity : Activity() {
                 if (isFinishing || isDestroyed) return@post
                 val currentName = currentChannel.name
                 val hadStream = ChannelCatalog.playableStream(currentChannel) != null
-                ChannelCatalog.channels = fresh
-                val idx = fresh.indexOfFirst { it.name == currentName }
+                ChannelCatalog.setAll(fresh)
+                val list = ChannelCatalog.channels
+                val idx = list.indexOfFirst { it.name == currentName }
                 channelIndex = if (idx >= 0) idx else 0
+                if (idx >= 0) loadedId = list[idx].id
                 if (!hadStream || idx < 0) playCurrentChannel() else showChannelInfo()
                 loadEpg() // yeni listedeki xmltvId'ler için EPG'yi (gerekirse) yeniden yükle
             }
@@ -267,12 +307,14 @@ class MainActivity : Activity() {
         guidePanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(16)); setBackgroundColor(Color.argb(245, 8, 11, 16)); visibility = View.GONE
         }
-        guidePanel.addView(text("YAYIN REHBERİ   ·   OK: KANALA GEÇ   ·   BACK: KAPAT", 22f, Color.WHITE, true))
+        guideTitle = text("KANALLAR", 22f, Color.WHITE, true)
+        guidePanel.addView(guideTitle)
+        guidePanel.addView(text("◂ ▸ kategori   ·   OK: izle   ·   GERİ: kapat", 14f, Color.LTGRAY, false))
         val scroller = ScrollView(this)
         guideRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroller.addView(guideRows)
         guidePanel.addView(scroller, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(guidePanel, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
+        root.addView(guidePanel, FrameLayout.LayoutParams(-1, -1, Gravity.START))
         setContentView(root)
     }
 
@@ -286,6 +328,7 @@ class MainActivity : Activity() {
         handler.removeCallbacks(skipRunnable)
         if (!isRetry) retryCount = 0
         val channel = currentChannel
+        loadedId = channel.id
         getSharedPreferences("uydutv", MODE_PRIVATE).edit().putInt("last_channel", channel.number).apply()
         showChannelInfo()
         val stream = ChannelCatalog.playableStream(channel)
@@ -329,36 +372,100 @@ class MainActivity : Activity() {
             layoutParams = if (widthPx > 0) LinearLayout.LayoutParams(widthPx, -2) else LinearLayout.LayoutParams(0, -2, 1f)
         }
 
+    /** Bölünmüş ekran: sol %38 kanal listesi, sağda 16:9 önizleme + altında kanal bilgisi. */
+    private fun applyLayout(split: Boolean) {
+        val w = resources.displayMetrics.widthPixels
+        if (split) {
+            val pw = (w * 0.56f).toInt()
+            val ph = pw * 9 / 16
+            playerView.layoutParams = FrameLayout.LayoutParams(pw, ph, Gravity.END or Gravity.CENTER_VERTICAL).apply { marginEnd = dp(24) }
+            infoPanel.layoutParams = FrameLayout.LayoutParams(pw, -2, Gravity.END or Gravity.BOTTOM).apply { marginEnd = dp(24); bottomMargin = dp(36) }
+            guidePanel.layoutParams = FrameLayout.LayoutParams((w * 0.38f).toInt(), -1, Gravity.START)
+            statusText.layoutParams = FrameLayout.LayoutParams(-2, -2, Gravity.END or Gravity.CENTER_VERTICAL).apply { marginEnd = dp(24) }
+            statusText.maxWidth = pw - dp(16)
+        } else {
+            playerView.layoutParams = FrameLayout.LayoutParams(-1, -1)
+            infoPanel.layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM)
+            statusText.layoutParams = FrameLayout.LayoutParams(-2, -2, Gravity.CENTER)
+            statusText.maxWidth = Int.MAX_VALUE
+        }
+    }
+
     private fun openGuide() {
+        if (!guideVisible) guideOriginId = currentChannel.id
         guideVisible = true; overlayVisible = true
+        applyLayout(true)
         guideRows.removeAllViews()
+        guideTitle.text = "◂  ${ChannelCatalog.categoryLabel(ChannelCatalog.category)}  ▸   (${ChannelCatalog.channels.size})"
         val now = System.currentTimeMillis()
         ChannelCatalog.channels.forEachIndexed { index, c ->
             val selected = index == channelIndex
-            val current = findProgram(c, now)?.title ?: "Canlı"
-            val next = findNextProgram(c, now)?.title ?: "Program bilgisi yok"
+            val current = findProgram(c, now)?.title
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(8))
                 isFocusable = true; isFocusableInTouchMode = true
                 setBackgroundColor(if (selected) Color.rgb(48, 56, 70) else Color.TRANSPARENT)
-                addView(cell(String.format(Locale.getDefault(), "%03d", c.number), dp(70), selected))
-                addView(cell(c.name, dp(220), selected))
-                addView(cell(current, 0, false))
-                addView(cell("→  $next", 0, false))
-                setOnClickListener { channelIndex = index; skipChain = 0; closeGuide(); playCurrentChannel() }
-                setOnFocusChangeListener { v, hasFocus -> v.setBackgroundColor(if (hasFocus) Color.rgb(48, 56, 70) else Color.TRANSPARENT) }
+                addView(cell(String.format(Locale.getDefault(), "%03d", c.number), dp(64), selected))
+                val col = LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                }
+                col.addView(text(c.name, 20f, Color.WHITE, selected).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                if (current != null) col.addView(text(current, 14f, Color.LTGRAY, false).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                addView(col)
+                setOnClickListener { channelIndex = index; skipChain = 0; closeGuide(commit = true) }
+                setOnFocusChangeListener { v, hasFocus ->
+                    v.setBackgroundColor(if (hasFocus) Color.rgb(48, 56, 70) else Color.TRANSPARENT)
+                    if (hasFocus) {
+                        channelIndex = index
+                        showChannelInfo()
+                        handler.removeCallbacks(previewRunnable)
+                        handler.postDelayed(previewRunnable, 500) // seçili kanal sağda önizlenir
+                    }
+                }
             }
-            guideRows.addView(row, LinearLayout.LayoutParams(-1, dp(52)))
+            guideRows.addView(row, LinearLayout.LayoutParams(-1, dp(60)))
         }
         guidePanel.visibility = View.VISIBLE
-        infoPanel.visibility = View.GONE
         guideRows.getChildAt(channelIndex)?.requestFocus()
-        resetIdleTimer()
+        showChannelInfo()
     }
 
-    private fun closeGuide() { guideVisible = false; guidePanel.visibility = View.GONE; showChannelInfo() }
+    private fun moveGuideFocus(delta: Int) {
+        val n = guideRows.childCount
+        if (n == 0) return
+        guideRows.getChildAt(((channelIndex + delta) % n + n) % n)?.requestFocus()
+    }
+
+    /** Kategoriyi değiştirir (◂ ▸). Oynayan kanal yeni kategoride varsa seçili kalır, yoksa ilk kanal önizlenir. */
+    private fun cycleCategory(delta: Int) {
+        val cats = ChannelCatalog.categories()
+        val cur = cats.indexOf(ChannelCatalog.category).coerceAtLeast(0)
+        val next = cats[(cur + delta + cats.size) % cats.size]
+        val playingId = loadedId
+        ChannelCatalog.setCategory(next)
+        val idx = ChannelCatalog.channels.indexOfFirst { it.id == playingId }
+        channelIndex = if (idx >= 0) idx else 0
+        openGuide()
+    }
+
+    /** commit=true: seçili kanalda tam ekrana geç. commit=false (GERİ): liste açılmadan önceki kanala dön. */
+    private fun closeGuide(commit: Boolean) {
+        handler.removeCallbacks(previewRunnable)
+        guideVisible = false
+        guidePanel.visibility = View.GONE
+        applyLayout(false)
+        if (!commit) {
+            val id = guideOriginId
+            var idx = ChannelCatalog.channels.indexOfFirst { it.id == id }
+            if (idx < 0) { ChannelCatalog.setCategory(null); idx = ChannelCatalog.channels.indexOfFirst { it.id == id } }
+            channelIndex = idx.coerceAtLeast(0)
+        }
+        if (currentChannel.id != loadedId) playCurrentChannel() else showChannelInfo()
+    }
+
     private fun hideOverlays() { if (!guideVisible) { infoPanel.visibility = View.GONE; overlayVisible = false } }
     private fun resetIdleTimer() { handler.removeCallbacks(idleHide); handler.postDelayed(idleHide, 5000) }
 
@@ -377,7 +484,11 @@ class MainActivity : Activity() {
         if (digitBuffer.isEmpty()) return
         val number = digitBuffer.toString().toIntOrNull()
         digitBuffer.clear()
-        val found = ChannelCatalog.channels.indexOfFirst { it.number == number }
+        var found = ChannelCatalog.channels.indexOfFirst { it.number == number }
+        if (found < 0 && ChannelCatalog.all.any { it.number == number }) {
+            ChannelCatalog.setCategory(null) // numara başka kategoride: tüm kanallara dön
+            found = ChannelCatalog.channels.indexOfFirst { it.number == number }
+        }
         if (found >= 0) { channelIndex = found; skipChain = 0; playCurrentChannel() }
         else { Toast.makeText(this, "Bu kanal numarası listede yok", Toast.LENGTH_SHORT).show(); showChannelInfo() }
     }
@@ -460,8 +571,12 @@ class MainActivity : Activity() {
         if (introView != null) { finishIntro(); return true }
         if (guideVisible) {
             when (event.keyCode) {
-                KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> { closeGuide(); return true }
-                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> { resetIdleTimer(); return super.dispatchKeyEvent(event) }
+                KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> { closeGuide(commit = false); return true }
+                KeyEvent.KEYCODE_DPAD_LEFT -> { cycleCategory(-1); return true }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> { cycleCategory(1); return true }
+                KeyEvent.KEYCODE_CHANNEL_UP -> { moveGuideFocus(-1); return true }
+                KeyEvent.KEYCODE_CHANNEL_DOWN -> { moveGuideFocus(1); return true }
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> { resetIdleTimer(); return super.dispatchKeyEvent(event) }
             }
         }
         when (event.keyCode) {
@@ -470,7 +585,13 @@ class MainActivity : Activity() {
             KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_DPAD_UP -> { changeChannel(-1); return true }
             KeyEvent.KEYCODE_GUIDE, KeyEvent.KEYCODE_G -> { openGuide(); return true }
             KeyEvent.KEYCODE_INFO, KeyEvent.KEYCODE_I -> { showChannelInfo(); return true }
-            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> { if (infoPanel.visibility != View.VISIBLE) showChannelInfo() else openGuide(); return true }
+            // OK: 1 kez = kanal bilgisi, 2 kez (2 sn içinde) = sol kanal listesi + sağ önizleme
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                val now = SystemClock.uptimeMillis()
+                if (now - lastOkAt < 2000) openGuide() else showChannelInfo()
+                lastOkAt = now
+                return true
+            }
             KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> {
                 // Bilgi bandı açıksa önce onu kapat; kapalıysa normal geri davranışı (uygulamadan çıkış).
                 if (infoPanel.visibility == View.VISIBLE) { hideOverlays(); return true }

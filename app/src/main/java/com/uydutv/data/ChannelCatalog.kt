@@ -30,7 +30,9 @@ data class TvChannel(
     val logoStatus: VerificationStatus = VerificationStatus.NOT_VERIFIED,
     val streamStatus: VerificationStatus = VerificationStatus.PERMISSION_NOT_CONFIRMED,
     val epgStatus: VerificationStatus = VerificationStatus.NOT_VERIFIED,
-    val notes: String? = null
+    val notes: String? = null,
+    /** M3U group-title değerleri (ör. News, Sports). Kategori menüsü bunlarla çalışır. */
+    val groups: List<String> = emptyList()
 )
 
 object ChannelCatalog {
@@ -69,10 +71,63 @@ object ChannelCatalog {
 
     val builtIn: List<TvChannel> = ChannelOrder.apply(builtInRaw)
 
-    @Volatile var channels: List<TvChannel> = builtIn
+    /** Tüm kanallar. */
+    @Volatile var all: List<TvChannel> = builtIn
+        private set
 
-    /** Kullanıcının seçtiği M3U oynatma listesi. */
-    const val PLAYLIST_URL: String = "https://iptv-org.github.io/iptv/countries/tr.m3u"
+    /** Seçili kategori (null = tüm kanallar). */
+    @Volatile var category: String? = null
+        private set
+
+    /** Şu an gezilen (kategoriye göre süzülmüş) kanal listesi. */
+    @Volatile var channels: List<TvChannel> = builtIn
+        private set
+
+    /** Kullanıcının seçtiği M3U oynatma listeleri: Türkiye ülke listesi + Türkçe dil listesi (birleştirilip tekrarlar atılır). */
+    val PLAYLIST_URLS: List<String> = listOf(
+        "https://iptv-org.github.io/iptv/countries/tr.m3u",
+        "https://iptv-org.github.io/iptv/languages/tur.m3u"
+    )
+
+    fun setAll(list: List<TvChannel>) {
+        all = list
+        val c = category
+        if (c != null && list.none { c in it.groups }) category = null
+        recompute()
+    }
+
+    fun setCategory(c: String?) { category = c; recompute() }
+
+    private fun recompute() {
+        val c = category
+        channels = if (c == null) all else all.filter { c in it.groups }.ifEmpty { all }
+    }
+
+    private val categoryOrder = listOf(
+        "General", "News", "Sports", "Movies", "Series", "Entertainment", "Kids", "Music", "Documentary",
+        "Religious", "Culture", "Education", "Lifestyle", "Comedy", "Animation", "Family", "Business",
+        "Cooking", "Travel", "Weather", "Science", "Outdoor", "Classic", "Shop", "Relax", "Legislative"
+    )
+
+    /** Menüdeki kategoriler: önce null (Tümü), sonra listede gerçekten kanalı olanlar. */
+    fun categories(): List<String?> {
+        val present = all.flatMap { it.groups }.toSet()
+        val known = categoryOrder.filter { it in present }
+        val rest = present.filter { it !in categoryOrder && it != "Undefined" }.sorted()
+        return listOf<String?>(null) + known + rest
+    }
+
+    fun categoryLabel(key: String?): String = when (key) {
+        null -> "Tüm Kanallar"
+        "General" -> "Genel"; "News" -> "Haber"; "Sports" -> "Spor"; "Movies" -> "Film"
+        "Series" -> "Dizi"; "Entertainment" -> "Eğlence"; "Kids" -> "Çocuk"; "Music" -> "Müzik"
+        "Documentary" -> "Belgesel"; "Religious" -> "Dini"; "Culture" -> "Kültür"; "Education" -> "Eğitim"
+        "Lifestyle" -> "Yaşam"; "Comedy" -> "Komedi"; "Animation" -> "Animasyon"; "Family" -> "Aile"
+        "Business" -> "İş / Ekonomi"; "Cooking" -> "Mutfak"; "Travel" -> "Seyahat"; "Weather" -> "Hava Durumu"
+        "Science" -> "Bilim"; "Outdoor" -> "Doğa"; "Classic" -> "Klasik"; "Shop" -> "Alışveriş"
+        "Relax" -> "Dinlenme"; "Legislative" -> "Meclis"; "Undefined" -> "Diğer"
+        else -> key ?: "Diğer"
+    }
 
     fun channelByNumber(number: Int): TvChannel? = channels.firstOrNull { it.number == number }
     fun channelById(id: String): TvChannel? = channels.firstOrNull { it.id == id }
