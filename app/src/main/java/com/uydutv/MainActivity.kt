@@ -23,6 +23,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.uydutv.data.ChannelCatalog
+import com.uydutv.data.PlaylistLoader
 import com.uydutv.data.TvChannel
 import java.net.HttpURLConnection
 import java.net.URL
@@ -82,12 +83,28 @@ class MainActivity : Activity() {
                 }
             })
         }
+        PlaylistLoader.loadCached(this)?.let { ChannelCatalog.channels = it }
         val saved = getSharedPreferences("uydutv", MODE_PRIVATE).getInt("last_channel", 1)
         channelIndex = ChannelCatalog.channels.indexOfFirst { it.number == saved }.coerceAtLeast(0)
         showChannelInfo()
         playCurrentChannel()
+        refreshPlaylist()
         loadEpg()
         resetIdleTimer()
+    }
+
+    private fun refreshPlaylist() {
+        worker.execute {
+            val fresh = PlaylistLoader.download(this) ?: return@execute
+            handler.post {
+                val currentName = currentChannel.name
+                val hadStream = ChannelCatalog.playableStream(currentChannel) != null
+                ChannelCatalog.channels = fresh
+                val idx = fresh.indexOfFirst { it.name == currentName }
+                channelIndex = if (idx >= 0) idx else 0
+                if (!hadStream || idx < 0) playCurrentChannel() else showChannelInfo()
+            }
+        }
     }
 
     private fun buildUi() {

@@ -6,7 +6,7 @@
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
     <application
         android:allowBackup="false"
-        android:usesCleartextTraffic="false"
+        android:usesCleartextTraffic="true"
         android:label="UyduTV"
         android:icon="@drawable/ic_utv"
         android:banner="@drawable/tv_banner"

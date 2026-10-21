@@ -39,7 +39,8 @@ object ChannelCatalog {
      * These are candidate channels with official live-page references.
      * Direct stream URLs, logos and XMLTV IDs are intentionally null until verified.
      */
-    val channels: List<TvChannel> = listOf(
+    /** Varsayılan (yerleşik) liste. Oynatma listesi yüklenince `channels` onunla değiştirilir. */
+    val builtIn: List<TvChannel> = listOf(
         TvChannel(1, "trt1", "TRT 1", officialLivePage = "https://www.trtizle.com/",
             notes = "Resmî TRT İzle giriş noktası; doğrudan akış ve uygulamada kullanım izni doğrulanmadı."),
         TvChannel(2, "trthaber", "TRT Haber", officialLivePage = "https://www.trtizle.com/",
@@ -63,6 +64,11 @@ object ChannelCatalog {
         TvChannel(11, "haberturk", "Habertürk TV", officialLivePage = "https://www.haberturk.com/canliyayin",
             notes = "Resmî canlı yayın sayfası; doğrudan akış ve uygulamada kullanım izni doğrulanmadı.")
     )
+
+    @Volatile var channels: List<TvChannel> = builtIn
+
+    /** Kullanıcının seçtiği M3U oynatma listesi. */
+    const val PLAYLIST_URL: String = "https://iptv-org.github.io/iptv/countries/tr.m3u"
 
     fun channelByNumber(number: Int): TvChannel? = channels.firstOrNull { it.number == number }
     fun channelById(id: String): TvChannel? = channels.firstOrNull { it.id == id }
