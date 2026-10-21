@@ -90,9 +90,11 @@ class MainActivity : Activity() {
         if (guideVisible && channelIndex in ChannelCatalog.channels.indices && currentChannel.id != loadedId) { skipChain = 0; playCurrentChannel() }
     }
 
-    private val bg = Color.rgb(8, 10, 14)
-    private val panel = Color.argb(225, 12, 16, 23)
-    private val accent = Color.rgb(239, 68, 68)
+    private val bg = Color.rgb(5, 10, 19)
+    private val panel = Color.argb(242, 7, 16, 29)
+    private val accent = Color.rgb(0, 174, 255)
+    private val selectedRow = Color.rgb(8, 61, 96)
+    private val mutedText = Color.rgb(166, 184, 207)
 
     data class Program(val channelId: String, val title: String, val start: Long, val end: Long)
 
@@ -281,7 +283,10 @@ class MainActivity : Activity() {
     }
 
     private fun buildUi() {
-        root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK); isFocusableInTouchMode = true }
+        root = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+            isFocusableInTouchMode = true
+        }
         playerView = PlayerView(this).apply {
             useController = false
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
@@ -289,28 +294,46 @@ class MainActivity : Activity() {
             layoutParams = FrameLayout.LayoutParams(-1, -1)
         }
         root.addView(playerView)
-        // Kanal değişiminde kısa "parazit" geçişi: oynatıcının üstünde görünen gri katman.
-        flash = View(this).apply { setBackgroundColor(Color.rgb(150, 150, 150)); visibility = View.GONE }
+        flash = View(this).apply {
+            setBackgroundColor(Color.argb(95, 0, 0, 0))
+            visibility = View.GONE
+        }
         root.addView(flash, FrameLayout.LayoutParams(-1, -1))
-        statusText = text("CNDN TV · yayın kaynağı bekleniyor", 22f, Color.WHITE, true).apply {
-            setBackgroundColor(Color.argb(190, 0, 0, 0)); setPadding(dp(14))
+        statusText = text("CNDN TV  ·  Yayın kaynağı bekleniyor", 22f, Color.WHITE, true).apply {
+            setBackgroundColor(Color.argb(220, 7, 16, 29))
+            setPadding(dp(22), dp(16), dp(22), dp(16))
             visibility = View.VISIBLE
         }
         root.addView(statusText, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
         infoPanel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(dp(16)); setBackgroundColor(panel)
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(34), dp(20), dp(34), dp(22))
+            setBackgroundColor(Color.argb(225, 5, 12, 23))
         }
-        infoTitle = text("", 28f, Color.WHITE, true)
-        infoSubtitle = text("", 18f, Color.LTGRAY, false)
-        infoPanel.addView(infoTitle); infoPanel.addView(infoSubtitle)
+        infoTitle = text("", 30f, Color.WHITE, true)
+        infoSubtitle = text("", 18f, mutedText, false)
+        infoPanel.addView(infoTitle)
+        infoPanel.addView(infoSubtitle)
         root.addView(infoPanel, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         guidePanel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(dp(16)); setBackgroundColor(Color.argb(245, 8, 11, 16)); visibility = View.GONE
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(24), dp(18), dp(20))
+            setBackgroundColor(Color.argb(248, 5, 13, 25))
+            visibility = View.GONE
+            elevation = dp(18).toFloat()
         }
-        guideTitle = text("KANALLAR", 22f, Color.WHITE, true)
+        guidePanel.addView(text("CNDN  |  IPTV", 17f, accent, true).apply {
+            letterSpacing = 0.12f
+            setPadding(dp(10), dp(4), dp(10), dp(16))
+        })
+        guideTitle = text("KANALLAR", 27f, Color.WHITE, true).apply {
+            setPadding(dp(10), dp(6), dp(10), dp(10))
+        }
         guidePanel.addView(guideTitle)
-        guidePanel.addView(text("◂ ▸ kategori   ·   OK: izle   ·   GERİ: kapat", 14f, Color.LTGRAY, false))
-        val scroller = ScrollView(this)
+        guidePanel.addView(text("◂  Kategori değiştir   ·   OK: İzle   ·   GERİ: Kapat", 14f, mutedText, false).apply {
+            setPadding(dp(10), 0, dp(10), dp(18))
+        })
+        val scroller = ScrollView(this).apply { clipToPadding = false }
         guideRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroller.addView(guideRows)
         guidePanel.addView(scroller, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -404,9 +427,13 @@ class MainActivity : Activity() {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(8))
+                setPadding(dp(12), dp(6), dp(10), dp(6))
                 isFocusable = true; isFocusableInTouchMode = true
-                setBackgroundColor(if (selected) Color.rgb(48, 56, 70) else Color.TRANSPARENT)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = dp(12).toFloat()
+                    setColor(if (selected) selectedRow else Color.TRANSPARENT)
+                    if (selected) setStroke(dp(2), accent)
+                }
                 addView(cell(String.format(Locale.getDefault(), "%03d", c.number), dp(64), selected))
                 val col = LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
@@ -417,7 +444,11 @@ class MainActivity : Activity() {
                 addView(col)
                 setOnClickListener { channelIndex = index; skipChain = 0; closeGuide(commit = true) }
                 setOnFocusChangeListener { v, hasFocus ->
-                    v.setBackgroundColor(if (hasFocus) Color.rgb(48, 56, 70) else Color.TRANSPARENT)
+                    v.background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = dp(12).toFloat()
+                        setColor(if (hasFocus) selectedRow else Color.TRANSPARENT)
+                        if (hasFocus) setStroke(dp(2), accent)
+                    }
                     if (hasFocus) {
                         channelIndex = index
                         showChannelInfo()
@@ -426,7 +457,9 @@ class MainActivity : Activity() {
                     }
                 }
             }
-            guideRows.addView(row, LinearLayout.LayoutParams(-1, dp(60)))
+            val rowParams = LinearLayout.LayoutParams(-1, dp(68))
+            rowParams.bottomMargin = dp(5)
+            guideRows.addView(row, rowParams)
         }
         guidePanel.visibility = View.VISIBLE
         guideRows.getChildAt(channelIndex)?.requestFocus()
