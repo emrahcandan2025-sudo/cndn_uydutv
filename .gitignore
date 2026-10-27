@@ -1,7 +1,11 @@
 *.jks
 *.keystore
+*.jks.b64
+*.keystore.base64
+release.keystore
 local.properties
 .gradle/
 build/
 .idea/
 *.iml
+

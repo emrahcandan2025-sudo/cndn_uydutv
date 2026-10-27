@@ -1,5 +1,7 @@
 package com.uydutv.data
 
+import java.util.Locale
+
 /**
  * CNDN TV fixed channel catalog.
  *
@@ -36,6 +38,9 @@ data class TvChannel(
 )
 
 object ChannelCatalog {
+    /** Primary M3U playlist source specified for CNDN TV. */
+    const val PRIMARY_PLAYLIST_URL: String = "https://streams.uzunmuhalefet.com/lists/tr.m3u"
+
     /** Candidate XMLTV feed. Feed availability does not establish redistribution rights. */
     const val XMLTV_SOURCE_URL: String = "https://iptv-epg.org/files/epg-tr.xml"
 
@@ -83,16 +88,17 @@ object ChannelCatalog {
     @Volatile var channels: List<TvChannel> = builtIn
         private set
 
-    /** Kullanıcının seçtiği M3U oynatma listeleri: Türkiye ülke listesi + Türkçe dil listesi (birleştirilip tekrarlar atılır). */
+    /** Oynatma listesi kaynakları: Birincil liste ve yedek kaynaklar */
     val PLAYLIST_URLS: List<String> = listOf(
+        PRIMARY_PLAYLIST_URL,
         "https://iptv-org.github.io/iptv/countries/tr.m3u",
         "https://iptv-org.github.io/iptv/languages/tur.m3u"
     )
 
     fun setAll(list: List<TvChannel>) {
-        all = list
+        all = if (list.isEmpty()) builtIn else list
         val c = category
-        if (c != null && list.none { c in it.groups }) category = null
+        if (c != null && all.none { c in it.groups }) category = null
         recompute()
     }
 
@@ -106,7 +112,8 @@ object ChannelCatalog {
     private val categoryOrder = listOf(
         "General", "News", "Sports", "Movies", "Series", "Entertainment", "Kids", "Music", "Documentary",
         "Religious", "Culture", "Education", "Lifestyle", "Comedy", "Animation", "Family", "Business",
-        "Cooking", "Travel", "Weather", "Science", "Outdoor", "Classic", "Shop", "Relax", "Legislative"
+        "Cooking", "Travel", "Weather", "Science", "Outdoor", "Classic", "Shop", "Relax", "Legislative",
+        "Ulusal", "Haber", "Spor", "Sinema", "Dizi", "Belgesel", "Müzik", "Çocuk", "Dini", "Yerel"
     )
 
     /** Menüdeki kategoriler: önce null (Tümü), sonra listede gerçekten kanalı olanlar. */
@@ -119,13 +126,16 @@ object ChannelCatalog {
 
     fun categoryLabel(key: String?): String = when (key) {
         null -> "Tüm Kanallar"
-        "General" -> "Genel"; "News" -> "Haber"; "Sports" -> "Spor"; "Movies" -> "Film"
-        "Series" -> "Dizi"; "Entertainment" -> "Eğlence"; "Kids" -> "Çocuk"; "Music" -> "Müzik"
-        "Documentary" -> "Belgesel"; "Religious" -> "Dini"; "Culture" -> "Kültür"; "Education" -> "Eğitim"
-        "Lifestyle" -> "Yaşam"; "Comedy" -> "Komedi"; "Animation" -> "Animasyon"; "Family" -> "Aile"
-        "Business" -> "İş / Ekonomi"; "Cooking" -> "Mutfak"; "Travel" -> "Seyahat"; "Weather" -> "Hava Durumu"
-        "Science" -> "Bilim"; "Outdoor" -> "Doğa"; "Classic" -> "Klasik"; "Shop" -> "Alışveriş"
-        "Relax" -> "Dinlenme"; "Legislative" -> "Meclis"; "Undefined" -> "Diğer"
+        "General", "Ulusal" -> "Genel"; "News", "Haber" -> "Haber"; "Sports", "Spor" -> "Spor"
+        "Movies", "Sinema" -> "Film"; "Series", "Dizi" -> "Dizi"; "Entertainment", "Eğlence" -> "Eğlence"
+        "Kids", "Çocuk" -> "Çocuk"; "Music", "Müzik" -> "Müzik"; "Documentary", "Belgesel" -> "Belgesel"
+        "Religious", "Dini" -> "Dini"; "Culture", "Kültür" -> "Kültür"; "Education", "Eğitim" -> "Eğitim"
+        "Lifestyle", "Yaşam" -> "Yaşam"; "Comedy", "Komedi" -> "Komedi"; "Animation", "Animasyon" -> "Animasyon"
+        "Family", "Aile" -> "Aile"; "Business", "Ekonomi" -> "İş / Ekonomi"; "Cooking", "Mutfak" -> "Mutfak"
+        "Travel", "Seyahat" -> "Seyahat"; "Weather", "Hava" -> "Hava Durumu"; "Science", "Bilim" -> "Bilim"
+        "Outdoor", "Doğa" -> "Doğa"; "Classic", "Klasik" -> "Klasik"; "Shop", "Alışveriş" -> "Alışveriş"
+        "Relax", "Dinlenme" -> "Dinlenme"; "Legislative", "Meclis" -> "Meclis"; "Yerel" -> "Yerel Kanallar"
+        "Undefined" -> "Diğer"
         else -> key ?: "Diğer"
     }
 
@@ -133,9 +143,20 @@ object ChannelCatalog {
     fun channelById(id: String): TvChannel? = channels.firstOrNull { it.id == id }
 
     /** Yalnızca doğrulanmış (VERIFIED) veya kullanıcının kendi listesinden gelen (USER_PROVIDED) akışlar oynatılır. */
-    fun playableStream(channel: TvChannel): String? =
-        channel.streamUrl?.takeIf {
-            it.isNotBlank() && (channel.streamStatus == VerificationStatus.VERIFIED ||
-                channel.streamStatus == VerificationStatus.USER_PROVIDED)
+    fun playableStream(channel: TvChannel): String? {
+        val url = channel.streamUrl?.trim() ?: return null
+        if (url.isBlank()) return null
+        // M3U dosyasının kendisini doğrudan video oynatıcısına verme
+        if (url.endsWith(".m3u", ignoreCase = true) && !url.endsWith(".m3u8", ignoreCase = true)) {
+            return null
         }
+        val lower = url.lowercase(Locale.ROOT)
+        if (!lower.startsWith("http://") && !lower.startsWith("https://") && !lower.startsWith("rtmp://") && !lower.startsWith("rtsp://")) {
+            return null
+        }
+        return if (channel.streamStatus == VerificationStatus.VERIFIED ||
+            channel.streamStatus == VerificationStatus.USER_PROVIDED) {
+            url
+        } else null
+    }
 }

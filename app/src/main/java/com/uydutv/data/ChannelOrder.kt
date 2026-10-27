@@ -14,7 +14,7 @@ object ChannelOrder {
     // normalize() tarafından kullanılır; slots'tan ÖNCE tanımlanmalı.
     private val bracketed = Regex("""\(.*?\)|\[.*?\]""")
     private val nonAlnum = Regex("[^a-z0-9]")
-    private val qualitySuffix = Regex("(fhd|uhd|hd|sd)$")
+    private val qualitySuffix = Regex("(fhd|uhd|hd|sd|4k)$")
 
     private class Slot(val number: Int, title: String, aliases: List<String> = emptyList()) {
         val keys: Set<String> = (aliases + title).map { normalize(it) }.toSet()
@@ -32,30 +32,34 @@ object ChannelOrder {
         Slot(9, "NOW", listOf("NOW TV", "FOX", "FOX TV")),
         Slot(10, "Ülke TV", listOf("Ulke")),
         Slot(11, "TRT Haber"),
+        Slot(12, "TRT Spor"),
         Slot(13, "A Haber"),
+        Slot(14, "A Spor"),
         Slot(15, "TVNET", listOf("TV Net")),
+        Slot(16, "TRT Çocuk", listOf("TRT Cocuk")),
         Slot(17, "Habertürk TV", listOf("Haberturk")),
         Slot(20, "NTV"),
-        Slot(21, "CNN Türk"),
+        Slot(21, "CNN Türk", listOf("CNN Turk")),
         Slot(23, "TGRT Haber"),
         Slot(24, "24", listOf("24 TV", "TV24")),
         Slot(25, "Haber Global"),
         Slot(26, "Bloomberg HT"),
-        Slot(27, "Ekotürk", listOf("Ekotürk TV")),
-        Slot(29, "Bengütürk", listOf("Bengütürk TV")),
-        Slot(30, "TV 100"),
+        Slot(27, "Ekotürk", listOf("Ekotürk TV", "Ekoturk")),
+        Slot(29, "Bengütürk", listOf("Bengütürk TV", "Benguturk")),
+        Slot(30, "TV 100", listOf("TV100")),
         Slot(31, "Halk TV"),
         Slot(32, "Flash Haber", listOf("Flash Haber TV")),
         Slot(33, "Akit TV", listOf("Akit")),
+        Slot(34, "KRT TV", listOf("KRT")),
         Slot(35, "TRT 2")
     )
 
     /** Türkçe harfleri sadeleştirir; boşluk, noktalama, (parantez) ve HD/FHD ekini atar. */
-    private fun normalize(name: String): String {
+    fun normalize(name: String): String {
         val sb = StringBuilder(name.length)
         for (ch in name) sb.append(
             when (ch) {
-                'ı', 'İ' -> 'i'; 'ü', 'Ü' -> 'u'; 'ö', 'Ö' -> 'o'
+                'ı', 'İ', 'I' -> 'i'; 'ü', 'Ü' -> 'u'; 'ö', 'Ö' -> 'o'
                 'ç', 'Ç' -> 'c'; 'ş', 'Ş' -> 's'; 'ğ', 'Ğ' -> 'g'
                 else -> ch
             }
@@ -66,17 +70,42 @@ object ChannelOrder {
             .replace(qualitySuffix, "")
     }
 
+    /**
+     * Kanalları TV slotlarına yerleştirir.
+     * Tüm kanallara tekil (tekrarsız) ve kararlı kanal numaraları atanır.
+     */
     fun apply(channels: List<TvChannel>): List<TvChannel> {
+        if (channels.isEmpty()) return emptyList()
         val remaining = channels.toMutableList()
         val ordered = mutableListOf<TvChannel>()
+        val usedNumbers = mutableSetOf<Int>()
+
+        // 1. Önce tanımlı slotlarla eşleşen kanalları yerleştir
         for (slot in slots) {
             val idx = remaining.indexOfFirst { normalize(it.name) in slot.keys }
-            if (idx >= 0) ordered += remaining.removeAt(idx).copy(number = slot.number)
+            if (idx >= 0) {
+                val matched = remaining.removeAt(idx)
+                ordered += matched.copy(number = slot.number)
+                usedNumbers.add(slot.number)
+            }
         }
+
+        // 2. Kalan kanalları sıraya ekle (çakışmayan tekil numaralarla)
         if (KEEP_UNMATCHED) {
-            var n = slots.maxOf { it.number }
-            for (c in remaining) { n++; ordered += c.copy(number = n) }
+            val maxSlot = slots.maxOfOrNull { it.number } ?: 0
+            var nextNumber = maxSlot + 1
+            for (c in remaining) {
+                while (usedNumbers.contains(nextNumber)) {
+                    nextNumber++
+                }
+                ordered += c.copy(number = nextNumber)
+                usedNumbers.add(nextNumber)
+                nextNumber++
+            }
         }
-        return ordered.ifEmpty { channels }
+
+        return ordered.ifEmpty {
+            channels.mapIndexed { idx, ch -> ch.copy(number = idx + 1) }
+        }
     }
 }

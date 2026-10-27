@@ -1,0 +1,8 @@
+{
+  "name": "CNDN TV",
+  "description": "Live Turkish and regional TV streaming application with EPG guide and channel categories",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

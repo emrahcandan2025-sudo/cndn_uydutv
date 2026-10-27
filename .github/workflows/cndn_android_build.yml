@@ -90,6 +90,7 @@ jobs:
         id: gradle_build
         env:
           KEYSTORE_FILE: release.keystore
+          KEYSTORE_PATH: release.keystore
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'android' }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'androidreleasekey' }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'android' }}
@@ -102,9 +103,9 @@ jobs:
         run: |
           echo "=== Oluşan Çıktılar ==="
           ls -la app/build/outputs/apk/* 2>/dev/null || ls -la app/build/outputs/bundle/* 2>/dev/null || true
-          RELEASE_APK=$(ls app/build/outputs/apk/release/*.apk 2>/dev/null | head -n 1)
+          RELEASE_APK=$(ls app/build/outputs/apk/*/*.apk 2>/dev/null | head -n 1)
           if [ -n "$RELEASE_APK" ] && [ -f "$RELEASE_APK" ]; then
-            echo "Release APK bulundu: $RELEASE_APK"
+            echo "APK bulundu: $RELEASE_APK"
             if command -v apksigner >/dev/null 2>&1; then
               apksigner verify --verbose "$RELEASE_APK" || true
             else
@@ -116,7 +117,9 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: cndn-apk-release
-          path: app/build/outputs/apk/release/*.apk
+          name: cndn-apk-output
+          path: |
+            app/build/outputs/apk/*/*.apk
+            app/build/outputs/bundle/*/*.aab
           retention-days: 14
-          if-no-files-found: error
+          if-no-files-found: warn

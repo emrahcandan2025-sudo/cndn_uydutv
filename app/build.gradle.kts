@@ -17,8 +17,14 @@ android {
 
     // İmza bilgisi koda yazılmaz; CI/yerel ortamda ortam değişkeni olarak verilir.
     // Verilmezse release derlemesi debug anahtarıyla imzalanır (kendi dağıtımınız için kendi anahtarınızı tanımlayın).
-    val keystorePath: String? = System.getenv("KEYSTORE_PATH")
+    val keystorePath: String? = System.getenv("KEYSTORE_PATH") ?: System.getenv("KEYSTORE_FILE")
     signingConfigs {
+        create("debugConfig") {
+            storeFile = file("${rootDir}/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         if (keystorePath != null && file(keystorePath).exists()) {
             create("release") {
                 storeFile = file(keystorePath)
@@ -31,11 +37,13 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debugConfig")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
-        debug { applicationIdSuffix = ".debug" }
+        debug {
+            signingConfig = signingConfigs.getByName("debugConfig")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -50,4 +58,5 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
     implementation("androidx.media3:media3-exoplayer-dash:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
+    testImplementation("junit:junit:4.13.2")
 }
