@@ -18,12 +18,15 @@ android {
     // İmza bilgisi koda yazılmaz; CI/yerel ortamda ortam değişkeni olarak verilir.
     // Verilmezse release derlemesi debug anahtarıyla imzalanır (kendi dağıtımınız için kendi anahtarınızı tanımlayın).
     val keystorePath: String? = System.getenv("KEYSTORE_PATH") ?: System.getenv("KEYSTORE_FILE")
+    val rootDebugKeystore = file("${rootDir}/debug.keystore")
     signingConfigs {
-        create("debugConfig") {
-            storeFile = file("${rootDir}/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+        if (rootDebugKeystore.exists()) {
+            create("debugConfig") {
+                storeFile = rootDebugKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
         if (keystorePath != null && file(keystorePath).exists()) {
             create("release") {
@@ -37,12 +40,15 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debugConfig")
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.findByName("debugConfig")
+                ?: signingConfigs.getByName("debug")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         debug {
-            signingConfig = signingConfigs.getByName("debugConfig")
+            signingConfig = signingConfigs.findByName("debugConfig")
+                ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {
