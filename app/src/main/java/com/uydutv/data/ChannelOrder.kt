@@ -70,6 +70,13 @@ object ChannelOrder {
             .replace(qualitySuffix, "")
     }
 
+    /** Kanal adının bilinen TV slotlarından birine ait olup olmadığını kontrol eder. */
+    fun slotKeyForName(name: String): String? {
+        val norm = normalize(name)
+        val slot = slots.firstOrNull { norm in it.keys }
+        return slot?.let { "slot_${it.number}" }
+    }
+
     /**
      * Kanalları TV slotlarına yerleştirir.
      * Tüm kanallara tekil (tekrarsız) ve kararlı kanal numaraları atanır.

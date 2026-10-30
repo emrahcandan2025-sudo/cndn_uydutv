@@ -27,6 +27,7 @@ data class TvChannel(
     val name: String,
     val logoUrl: String? = null,
     val streamUrl: String? = null,
+    val streamUrls: List<String> = if (streamUrl != null) listOf(streamUrl) else emptyList(),
     val officialLivePage: String? = null,
     val xmltvId: String? = null,
     val logoStatus: VerificationStatus = VerificationStatus.NOT_VERIFIED,
@@ -34,12 +35,14 @@ data class TvChannel(
     val epgStatus: VerificationStatus = VerificationStatus.NOT_VERIFIED,
     val notes: String? = null,
     /** M3U group-title değerleri (ör. News, Sports). Kategori menüsü bunlarla çalışır. */
-    val groups: List<String> = emptyList()
+    val groups: List<String> = emptyList(),
+    /** Son ölçülen başarılı açılış süresi (milisaniye) */
+    val lastStartupLatencyMs: Long? = null
 )
 
 object ChannelCatalog {
-    /** Primary M3U playlist source specified for CNDN TV. */
-    const val PRIMARY_PLAYLIST_URL: String = "https://streams.uzunmuhalefet.com/lists/tr.m3u"
+    /** Primary M3U playlist source specified for CNDN TV (iptv-org Türkiye). */
+    const val PRIMARY_PLAYLIST_URL: String = "https://iptv-org.github.io/iptv/countries/tr.m3u"
 
     /** Candidate XMLTV feed. Feed availability does not establish redistribution rights. */
     const val XMLTV_SOURCE_URL: String = "https://iptv-epg.org/files/epg-tr.xml"
@@ -88,11 +91,11 @@ object ChannelCatalog {
     @Volatile var channels: List<TvChannel> = builtIn
         private set
 
-    /** Oynatma listesi kaynakları: Birincil liste ve yedek kaynaklar */
+    /** Oynatma listesi kaynakları: iptv-org birincil, diğerleri yedek ve birleştirilir */
     val PLAYLIST_URLS: List<String> = listOf(
-        PRIMARY_PLAYLIST_URL,
         "https://iptv-org.github.io/iptv/countries/tr.m3u",
-        "https://iptv-org.github.io/iptv/languages/tur.m3u"
+        "https://iptv-org.github.io/iptv/languages/tur.m3u",
+        "https://streams.uzunmuhalefet.com/lists/tr.m3u"
     )
 
     fun setAll(list: List<TvChannel>) {
@@ -107,6 +110,26 @@ object ChannelCatalog {
     private fun recompute() {
         val c = category
         channels = if (c == null) all else all.filter { c in it.groups }.ifEmpty { all }
+    }
+
+    /** Kanalın açılış süresini (gecikmesini) günceller. */
+    fun updateChannelLatency(channelId: String, latencyMs: Long) {
+        all = all.map { ch ->
+            if (ch.id == channelId) ch.copy(lastStartupLatencyMs = latencyMs) else ch
+        }
+        recompute()
+    }
+
+    /** Başarıyla açılan akış adresini kanalın yayın listesinin en başına alır. */
+    fun prioritizeStream(channelId: String, workingStream: String) {
+        all = all.map { ch ->
+            val streams = if (ch.streamUrls.isNotEmpty()) ch.streamUrls else listOfNotNull(ch.streamUrl)
+            if (ch.id == channelId && workingStream in streams) {
+                val reordered = listOf(workingStream) + streams.filter { it != workingStream }
+                ch.copy(streamUrl = workingStream, streamUrls = reordered)
+            } else ch
+        }
+        recompute()
     }
 
     private val categoryOrder = listOf(
@@ -143,8 +166,9 @@ object ChannelCatalog {
     fun channelById(id: String): TvChannel? = channels.firstOrNull { it.id == id }
 
     /** Yalnızca doğrulanmış (VERIFIED) veya kullanıcının kendi listesinden gelen (USER_PROVIDED) akışlar oynatılır. */
-    fun playableStream(channel: TvChannel): String? {
-        val url = channel.streamUrl?.trim() ?: return null
+    fun playableStream(channel: TvChannel, index: Int = 0): String? {
+        val urls = if (channel.streamUrls.isNotEmpty()) channel.streamUrls else listOfNotNull(channel.streamUrl)
+        val url = urls.getOrNull(index)?.trim() ?: return null
         if (url.isBlank()) return null
         // M3U dosyasının kendisini doğrudan video oynatıcısına verme
         if (url.endsWith(".m3u", ignoreCase = true) && !url.endsWith(".m3u8", ignoreCase = true)) {

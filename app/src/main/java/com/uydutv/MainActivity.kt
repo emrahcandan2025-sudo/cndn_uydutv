@@ -37,6 +37,7 @@ import androidx.media3.ui.PlayerView
 import com.uydutv.data.ChannelCatalog
 import com.uydutv.data.ChannelOrder
 import com.uydutv.data.PlaylistLoader
+import com.uydutv.data.StreamHealthManager
 import com.uydutv.data.TvChannel
 import java.net.HttpURLConnection
 import java.net.URL
@@ -72,6 +73,11 @@ class MainActivity : Activity() {
             return if (channelIndex in list.indices) list[channelIndex] else list.firstOrNull() ?: ChannelCatalog.builtIn.first()
         }
 
+    // Çoklu kaynak ve açılış süresi takibi
+    private var streamAttemptIndex = 0
+    private var streamStartTime = 0L
+    private var activePlayingStream: String? = null
+
     private val handler = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
     private val digitBuffer = StringBuilder()
@@ -105,6 +111,7 @@ class MainActivity : Activity() {
     private val previewRunnable = Runnable {
         if (guideVisible && channelIndex in ChannelCatalog.channels.indices && currentChannel.id != loadedId) {
             skipChain = 0
+            streamAttemptIndex = 0
             playCurrentChannel()
         }
     }
@@ -155,8 +162,18 @@ class MainActivity : Activity() {
 
         playCurrentChannel()
 
-        // 2. M3U listesini arka planda internetten indir ve güncelle
-        refreshPlaylist()
+        // 2. 6 saat kuralı: Yalnızca önbellek yoksa veya son güncellemeden 6 saat geçmişse indir
+        val prefs = getSharedPreferences("uydutv", MODE_PRIVATE)
+        val lastUpdate = prefs.getLong("last_playlist_update_time", 0L)
+        val now = System.currentTimeMillis()
+        val SIX_HOURS_MS = 6 * 60 * 60 * 1000L
+        val shouldRefresh = (cached == null || cached.isEmpty() || (now - lastUpdate) > SIX_HOURS_MS)
+
+        if (shouldRefresh) {
+            refreshPlaylist()
+        } else {
+            Log.i("MainActivity", "Önbellek güncel (${(now - lastUpdate) / 60000} dk önce); 6 saatlik kural gereği ağ yenilemesi atlandı.")
+        }
         loadEpg()
         resetIdleTimer()
     }
@@ -190,14 +207,45 @@ class MainActivity : Activity() {
         val exo = buildPlayer()
         playerView.player = exo
         exo.addListener(object : Player.Listener {
-            override fun onPlayerError(error: PlaybackException) = handlePlayerError(error)
+            override fun onPlayerError(error: PlaybackException) {
+                val currentStream = activePlayingStream
+                if (currentStream != null) {
+                    StreamHealthManager.recordFailure(this@MainActivity, currentChannel.id, currentStream)
+                }
+
+                val streams = if (currentChannel.streamUrls.isNotEmpty()) currentChannel.streamUrls else listOfNotNull(currentChannel.streamUrl)
+                if (streamAttemptIndex + 1 < streams.size) {
+                    statusText.text = "Kaynak ${streamAttemptIndex + 1} yanıt vermedi · Alternatif deneniyor (${streamAttemptIndex + 2}/${streams.size})…"
+                    statusText.visibility = View.VISIBLE
+                    handler.postDelayed({
+                        playCurrentChannel(tryNextStream = true)
+                    }, 500)
+                } else {
+                    handlePlayerError(error)
+                }
+            }
+
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY) {
+                    val latency = if (streamStartTime > 0L) SystemClock.elapsedRealtime() - streamStartTime else null
+                    streamStartTime = 0L
+                    val currentStream = activePlayingStream
+                    if (currentStream != null && latency != null) {
+                        StreamHealthManager.recordSuccess(this@MainActivity, currentChannel.id, currentStream, latency)
+                        ChannelCatalog.prioritizeStream(currentChannel.id, currentStream)
+                        ChannelCatalog.updateChannelLatency(currentChannel.id, latency)
+                    }
                     statusText.visibility = View.GONE
                     retryCount = 0
                     skipChain = 0
+                    showChannelInfo(loadLatencyMs = latency)
                 } else if (playbackState == Player.STATE_BUFFERING && ChannelCatalog.playableStream(currentChannel) != null) {
-                    statusText.text = "Canlı yayın yükleniyor…"
+                    val totalStreams = currentChannel.streamUrls.size
+                    statusText.text = if (totalStreams > 1) {
+                        "Canlı yayın yükleniyor… (Kaynak ${streamAttemptIndex + 1}/$totalStreams)"
+                    } else {
+                        "Canlı yayın yükleniyor…"
+                    }
                     statusText.visibility = View.VISIBLE
                 }
             }
@@ -262,19 +310,21 @@ class MainActivity : Activity() {
         statusText.visibility = View.VISIBLE
     }
 
-
-
     /**
-     * M3U oynatma listesini arka planda indirir.
+     * 3 M3U listesini arka planda indirir ve birleştirir.
      * İndirme başarılıysa o anda oynatılan kanalı korur, kataloğu günceller.
      * İndirme başarısızsa kullanıcıya bilgi verir, mevcut çalışan yayını bozmaz.
      */
     private fun refreshPlaylist() {
         runOnWorker {
-            val fresh = PlaylistLoader.download(this)
+            val fresh = PlaylistLoader.downloadAndMergeAll(this)
             handler.post {
                 if (isFinishing || isDestroyed) return@post
-                if (fresh != null && fresh.isNotEmpty()) {
+                if (!fresh.isNullOrEmpty()) {
+                    getSharedPreferences("uydutv", MODE_PRIVATE).edit()
+                        .putLong("last_playlist_update_time", System.currentTimeMillis())
+                        .apply()
+
                     val currentName = currentChannel.name
                     val currentId = currentChannel.id
                     val hadStream = ChannelCatalog.playableStream(currentChannel) != null
@@ -306,7 +356,7 @@ class MainActivity : Activity() {
                     loadEpg()
                 } else {
                     // İndirme başarısız oldu: mevcut liste korunur
-                    Log.i("MainActivity", "M3U listesi güncellenemedi; mevcut liste korunuyor.")
+                    Log.i("MainActivity", "M3U listeleri güncellenemedi; mevcut liste korunuyor.")
                     if (ChannelCatalog.all == ChannelCatalog.builtIn && ChannelCatalog.playableStream(currentChannel) == null) {
                         statusText.text = "Çevrimiçi kanal listesine ulaşılamadı.\nLütfen internet bağlantınızı kontrol edin."
                         statusText.visibility = View.VISIBLE
@@ -405,38 +455,58 @@ class MainActivity : Activity() {
 
     /**
      * Kanala ait yayını başlatır:
-     * - Eski yayın bağlantısını güvenle sonlandırır.
-     * - HLS (.m3u8) MIME tipini doğru belirler.
-     * - Oynatıcı hatalarını ve boş yayın adreslerini güvenle yönetir.
+     * - Aynı kanalın birden fazla akış adresi varsa hızlı olanı önce dener.
+     * - Sırayla dener; ilk açılanı kullanır.
+     * - Açılış süresini (gecikmesini) kaydeder.
      */
-    private fun playCurrentChannel(isRetry: Boolean = false) {
+    private fun playCurrentChannel(isRetry: Boolean = false, tryNextStream: Boolean = false) {
         handler.removeCallbacks(retryRunnable)
         handler.removeCallbacks(skipRunnable)
-        if (!isRetry) retryCount = 0
+        if (!isRetry && !tryNextStream) {
+            retryCount = 0
+            streamAttemptIndex = 0
+        } else if (tryNextStream) {
+            streamAttemptIndex++
+        }
 
         val channel = currentChannel
         loadedId = channel.id
         getSharedPreferences("uydutv", MODE_PRIVATE).edit().putInt("last_channel", channel.number).apply()
-        showChannelInfo()
 
-        val stream = ChannelCatalog.playableStream(channel)
-        if (stream.isNullOrBlank()) {
+        val streams = if (channel.streamUrls.isNotEmpty()) channel.streamUrls else listOfNotNull(channel.streamUrl)
+
+        if (streams.isEmpty() || streamAttemptIndex >= streams.size) {
             player?.stop()
             player?.clearMediaItems()
-            statusText.text = "${channel.name}\nDoğrudan yayın adresi ve kullanım izni doğrulanmadı.\nKanal kaynağı yapılandırıldığında canlı yayın başlayacak."
-            statusText.visibility = View.VISIBLE
+            if (streams.isEmpty()) {
+                statusText.text = "${channel.name}\nDoğrudan yayın adresi ve kullanım izni doğrulanmadı.\nKanal kaynağı yapılandırıldığında canlı yayın başlayacak."
+                statusText.visibility = View.VISIBLE
+            } else {
+                handlePlayerError()
+            }
+            showChannelInfo()
             return
         }
 
-        statusText.text = "Canlı yayın yükleniyor…"
+        val stream = streams[streamAttemptIndex]
+        activePlayingStream = stream
+        streamStartTime = SystemClock.elapsedRealtime()
+
+        val totalStreams = streams.size
+        statusText.text = if (totalStreams > 1) {
+            "Canlı yayın yükleniyor… (Kaynak ${streamAttemptIndex + 1}/$totalStreams)"
+        } else {
+            "Canlı yayın yükleniyor…"
+        }
         statusText.visibility = View.VISIBLE
+        showChannelInfo()
 
         try {
             val p = player ?: return
             p.stop()
             p.clearMediaItems()
 
-            // HLS akışı tespiti: URL .m3u8 içeriyorsa M3U8 MIME türüyle oluştur
+            // HLS veya DASH akışı tespiti
             val mediaItem = if (stream.contains(".m3u8", ignoreCase = true) || stream.contains("m3u8", ignoreCase = true) || stream.contains("hls", ignoreCase = true)) {
                 MediaItem.Builder()
                     .setUri(stream)
@@ -459,18 +529,23 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showChannelInfo() {
+    private fun showChannelInfo(loadLatencyMs: Long? = null) {
         val c = currentChannel
-        infoTitle.text = String.format(Locale.getDefault(), "%03d   %s", c.number, c.name)
+        val latency = loadLatencyMs ?: c.lastStartupLatencyMs ?: StreamHealthManager.getChannelLatency(this, c.id)
+        val latencyStr = if (latency != null && latency > 0) "   ⚡ ${latency}ms" else ""
+        val totalStreams = c.streamUrls.size
+        val streamStr = if (totalStreams > 1) "   [K.${streamAttemptIndex + 1}/$totalStreams]" else ""
+
+        infoTitle.text = String.format(Locale.getDefault(), "%03d   %s%s", c.number, c.name, streamStr)
         val now = System.currentTimeMillis()
         val cur = findProgram(c, now)
         val next = findNextProgram(c, now)
         infoSubtitle.text = if (cur != null) {
             val timeFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
             val curTime = "${timeFmt.format(Date(cur.start))} - ${timeFmt.format(Date(cur.end))}"
-            "${cur.title} ($curTime)   ·   Sonraki: ${next?.title ?: "—"}"
+            "${cur.title} ($curTime)$latencyStr   ·   Sonraki: ${next?.title ?: "—"}"
         } else {
-            "Canlı Yayın   ·   Program bilgisi bulunamadı"
+            "Canlı Yayın$latencyStr   ·   Program bilgisi bulunamadı"
         }
         infoPanel.visibility = View.VISIBLE
         overlayVisible = true
@@ -523,6 +598,16 @@ class MainActivity : Activity() {
         ChannelCatalog.channels.forEachIndexed { index, c ->
             val selected = index == channelIndex
             val current = findProgram(c, now)?.title
+            val latency = c.lastStartupLatencyMs ?: StreamHealthManager.getChannelLatency(this, c.id)
+            val streamCount = c.streamUrls.size
+            val badge = buildString {
+                if (latency != null && latency > 0) append("⚡ ${latency}ms")
+                if (streamCount > 1) {
+                    if (isNotEmpty()) append(" · ")
+                    append("$streamCount kaynak")
+                }
+            }
+
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -539,9 +624,17 @@ class MainActivity : Activity() {
                     layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
                 }
                 col.addView(text(c.name, 20f, Color.WHITE, selected).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
-                if (current != null) col.addView(text(current, 14f, Color.LTGRAY, false).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                val subText = when {
+                    current != null && badge.isNotEmpty() -> "$current  ·  $badge"
+                    current != null -> current
+                    badge.isNotEmpty() -> badge
+                    else -> null
+                }
+                if (subText != null) {
+                    col.addView(text(subText, 14f, Color.LTGRAY, false).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                }
                 addView(col)
-                setOnClickListener { channelIndex = index; skipChain = 0; closeGuide(commit = true) }
+                setOnClickListener { channelIndex = index; skipChain = 0; streamAttemptIndex = 0; closeGuide(commit = true) }
                 setOnFocusChangeListener { v, hasFocus ->
                     v.background = GradientDrawable().apply {
                         cornerRadius = dp(12).toFloat()
@@ -550,6 +643,7 @@ class MainActivity : Activity() {
                     }
                     if (hasFocus) {
                         channelIndex = index
+                        streamAttemptIndex = 0
                         showChannelInfo()
                         handler.removeCallbacks(previewRunnable)
                         handler.postDelayed(previewRunnable, 500)
@@ -595,7 +689,12 @@ class MainActivity : Activity() {
             if (idx < 0) { ChannelCatalog.setCategory(null); idx = ChannelCatalog.channels.indexOfFirst { it.id == id } }
             channelIndex = idx.coerceAtLeast(0)
         }
-        if (currentChannel.id != loadedId) playCurrentChannel() else showChannelInfo()
+        if (currentChannel.id != loadedId) {
+            streamAttemptIndex = 0
+            playCurrentChannel()
+        } else {
+            showChannelInfo()
+        }
     }
 
     private fun hideOverlays() { if (!guideVisible) { infoPanel.visibility = View.GONE; overlayVisible = false } }
@@ -606,6 +705,7 @@ class MainActivity : Activity() {
         if (size == 0) return
         channelIndex = (channelIndex + delta + size) % size
         skipChain = 0
+        streamAttemptIndex = 0
         showChannelInfo()
         flash.visibility = View.VISIBLE
         handler.removeCallbacks(changeRunnable)
@@ -624,6 +724,7 @@ class MainActivity : Activity() {
         if (found >= 0) {
             channelIndex = found
             skipChain = 0
+            streamAttemptIndex = 0
             playCurrentChannel()
         } else {
             Toast.makeText(this, "Bu kanal numarası listede yok", Toast.LENGTH_SHORT).show()

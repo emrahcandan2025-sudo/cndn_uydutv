@@ -77,4 +77,68 @@ class PlaylistLoaderTest {
         val channels = PlaylistLoader.parse(duplicateUrls)
         assertEquals(2, channels.size)
     }
+
+    @Test
+    fun testMergeMultipleListsAndConsolidateStreams() {
+        val list1 = PlaylistLoader.parse("""
+            #EXTM3U
+            #EXTINF:-1 tvg-id="trt1" group-title="Ulusal",TRT 1
+            https://source1.com/trt1.m3u8
+            #EXTINF:-1 tvg-id="atv" group-title="Ulusal",ATV
+            https://source1.com/atv.m3u8
+        """.trimIndent())
+
+        val list2 = PlaylistLoader.parse("""
+            #EXTM3U
+            #EXTINF:-1 tvg-id="trt1" group-title="Genel",TRT 1 HD
+            https://source2.com/trt1_alt.m3u8
+            #EXTINF:-1 tvg-id="halktv" group-title="Haber",Halk TV
+            https://source2.com/halktv.m3u8
+        """.trimIndent())
+
+        val list3 = PlaylistLoader.parse("""
+            #EXTM3U
+            #EXTINF:-1 tvg-id="trt1" group-title="Ulusal",TRT 1
+            https://source3.com/trt1_backup.m3u8
+            #EXTINF:-1 tvg-id="atv" group-title="Ulusal",ATV HD
+            https://source3.com/atv_alt.m3u8
+        """.trimIndent())
+
+        val merged = PlaylistLoader.mergeChannelLists(listOf(list1, list2, list3))
+
+        val trt1 = merged.firstOrNull { it.number == 1 } // TRT 1 is Slot 1
+        assertNotNull(trt1)
+        assertEquals(3, trt1?.streamUrls?.size)
+        assertEquals("https://source1.com/trt1.m3u8", trt1?.streamUrls?.get(0))
+        assertEquals("https://source2.com/trt1_alt.m3u8", trt1?.streamUrls?.get(1))
+        assertEquals("https://source3.com/trt1_backup.m3u8", trt1?.streamUrls?.get(2))
+
+        val atv = merged.firstOrNull { it.number == 2 } // ATV is Slot 2
+        assertNotNull(atv)
+        assertEquals(2, atv?.streamUrls?.size)
+    }
+
+    @Test
+    fun testFilterPaywalledStreams() {
+        val m3uWithPaywalled = """
+            #EXTM3U
+            #EXTINF:-1,TRT 1
+            https://live.example.com/trt1.m3u8
+            #EXTINF:-1,Digiturk BeIN Sports 1
+            https://live.example.com/bein1.m3u8
+            #EXTINF:-1,D-Smart Spor Smart
+            https://live.example.com/sporsmart.m3u8
+            #EXTINF:-1,Tivibu Spor HD
+            https://live.example.com/tivibu.m3u8
+            #EXTINF:-1,Halk TV
+            https://live.example.com/halktv.m3u8
+        """.trimIndent()
+
+        val parsed = PlaylistLoader.parse(m3uWithPaywalled)
+        assertEquals(2, parsed.size)
+        assertTrue(parsed.any { it.name == "TRT 1" })
+        assertTrue(parsed.any { it.name == "Halk TV" })
+        assertFalse(parsed.any { it.name.contains("beIN", ignoreCase = true) })
+        assertFalse(parsed.any { it.name.contains("Digiturk", ignoreCase = true) })
+    }
 }

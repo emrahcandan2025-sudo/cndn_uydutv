@@ -8,22 +8,40 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.Locale
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
- * M3U oynatma listesini indirir, ayrıştırır ve çevrimdışı kullanım için diske önbelleğe kaydeder.
+ * M3U oynatma listelerini indirir, ayrıştırır, birden fazla kaynaktan gelen
+ * aynı kanalların akışlarını birleştirir, şifreli platformları eler ve diske önbelleğe kaydeder.
  */
 object PlaylistLoader {
     private const val TAG = "PlaylistLoader"
+    private const val CACHE_JSON_FILE = "merged_playlist.json"
     private const val CACHE_FILE = "playlist_tr.m3u"
     private const val LEGACY_CACHE_FILE = "playlist.m3u"
 
     // #EXTINF satırındaki anahtar="değer" veya anahtar='değer' veya anahtar=değer niteliklerini yakalar
     private val attrRegex = Regex("""([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s,]+))""")
 
+    // Şifreli ve abonelikli platform yayınlarını ayıklayan kara liste
+    private val blockedKeywords = listOf(
+        "digiturk", "beinsports", "bein sports", "bein connect", "d-smart", "dsmart",
+        "tivibu", "exxen", "s sport", "ssport", "s-sport", "tod tv", "blutv", "gain"
+    )
+
+    /**
+     * Şifreli / ücretli platform yayını olup olmadığını denetler. Yalnızca şifresiz (FTA) kanallar kalır.
+     */
+    fun isPaywalledOrRestricted(name: String, groups: List<String>, streamUrl: String): Boolean {
+        val text = "$name ${groups.joinToString(" ")} $streamUrl".lowercase(Locale.ROOT)
+        return blockedKeywords.any { text.contains(it) }
+    }
+
     /**
      * M3U metnini ayrıştırır.
      * UTF-8 Türkçe karakterleri, tvg-id, tvg-name, tvg-logo, group-title ve #EXTGRP etiketlerini destekler.
-     * Boş ad, boş yayın adresi veya doğrudan .m3u dosyası olan kayıtlar filtrelenir.
+     * Boş ad, boş yayın adresi, doğrudan .m3u dosyası veya şifreli platform yayınları filtrelenir.
      */
     fun parse(text: String): List<TvChannel> {
         val cleanText = if (text.startsWith("\uFEFF")) text.substring(1) else text
@@ -69,17 +87,15 @@ object PlaylistLoader {
                 }
                 !line.startsWith("#") && name != null -> {
                     val streamUrl = line.trim()
-                    // URL ve kanal adı doğrulaması:
-                    // 1. Boş kanal adı veya boş URL olmamalı
-                    // 2. M3U dosyasının kendisi video akışı olarak eklenmemeli (.m3u8 hariç)
-                    // 3. Desteklenen protokol olmalı
                     val isPlayableUrl = (streamUrl.startsWith("http://", ignoreCase = true) ||
                             streamUrl.startsWith("https://", ignoreCase = true) ||
                             streamUrl.startsWith("rtmp://", ignoreCase = true) ||
                             streamUrl.startsWith("rtsp://", ignoreCase = true)) &&
                             (!streamUrl.endsWith(".m3u", ignoreCase = true) || streamUrl.endsWith(".m3u8", ignoreCase = true))
 
-                    if (name.isNotBlank() && isPlayableUrl && seenUrls.add(streamUrl)) {
+                    val isAllowed = !isPaywalledOrRestricted(name, groups, streamUrl)
+
+                    if (name.isNotBlank() && isPlayableUrl && isAllowed && seenUrls.add(streamUrl)) {
                         val n = out.size + 1
                         val cleanId = "ch_${Math.abs(streamUrl.hashCode().toLong())}_$n"
                         out.add(
@@ -89,6 +105,7 @@ object PlaylistLoader {
                                 name = name,
                                 logoUrl = logo,
                                 streamUrl = streamUrl,
+                                streamUrls = listOf(streamUrl),
                                 xmltvId = tvgId,
                                 logoStatus = if (logo != null) VerificationStatus.USER_PROVIDED else VerificationStatus.NOT_VERIFIED,
                                 streamStatus = VerificationStatus.USER_PROVIDED,
@@ -110,9 +127,132 @@ object PlaylistLoader {
     }
 
     /**
-     * Cihazda kayıtlı son geçerli M3U önbelleğini yükler.
+     * Farklı kaynaklardan indirilen kanal listelerini birleştirir.
+     * Aynı kanalın (ad/slot eşleşmesi) birden fazla akış adresi varsa hepsini bir araya toplar.
+     * Hızlı açılan akışları öne alacak şekilde sıralar.
+     */
+    fun mergeChannelLists(lists: List<List<TvChannel>>, ctx: Context? = null): List<TvChannel> {
+        val grouped = linkedMapOf<String, MutableList<TvChannel>>()
+
+        for (list in lists) {
+            for (channel in list) {
+                if (isPaywalledOrRestricted(channel.name, channel.groups, channel.streamUrl ?: "")) {
+                    continue
+                }
+                val normName = ChannelOrder.normalize(channel.name)
+                if (normName.isBlank()) continue
+                val key = ChannelOrder.slotKeyForName(channel.name) ?: normName
+                grouped.getOrPut(key) { mutableListOf() }.add(channel)
+            }
+        }
+
+        val result = mutableListOf<TvChannel>()
+        for ((_, groupChannels) in grouped) {
+            val primary = groupChannels.first()
+
+            // Tüm aday akış adreslerini birleştir
+            val allStreams = mutableListOf<String>()
+            val seen = HashSet<String>()
+            for (ch in groupChannels) {
+                val streams = if (ch.streamUrls.isNotEmpty()) ch.streamUrls else listOfNotNull(ch.streamUrl)
+                for (st in streams) {
+                    if (seen.add(st)) {
+                        allStreams.add(st)
+                    }
+                }
+            }
+
+            // Gecikme ve başarı durumuna göre akışları sırala
+            val sortedStreams = if (ctx != null) {
+                StreamHealthManager.orderStreams(ctx, primary.id, allStreams)
+            } else {
+                allStreams
+            }
+
+            val allGroups = groupChannels.flatMap { it.groups }.distinct()
+            val xmltv = groupChannels.mapNotNull { it.xmltvId }.firstOrNull { it.isNotBlank() }
+            val logo = groupChannels.mapNotNull { it.logoUrl }.firstOrNull { it.isNotBlank() }
+            val official = groupChannels.mapNotNull { it.officialLivePage }.firstOrNull()
+            val latency = if (ctx != null) StreamHealthManager.getChannelLatency(ctx, primary.id) else primary.lastStartupLatencyMs
+
+            val mergedChannel = primary.copy(
+                streamUrl = sortedStreams.firstOrNull(),
+                streamUrls = sortedStreams,
+                xmltvId = xmltv,
+                logoUrl = logo,
+                officialLivePage = official,
+                groups = allGroups,
+                lastStartupLatencyMs = latency,
+                streamStatus = VerificationStatus.USER_PROVIDED
+            )
+            result.add(mergedChannel)
+        }
+
+        return ChannelOrder.apply(result)
+    }
+
+    /**
+     * Cihazda kayıtlı son geçerli M3U veya JSON önbelleğini yükler.
      */
     fun loadCached(ctx: Context): List<TvChannel>? {
+        // 1. Önce zengin JSON önbelleğini dene (çoklu akış ve gecikme bilgileri korunur)
+        val jsonFile = File(ctx.filesDir, CACHE_JSON_FILE)
+        if (jsonFile.exists() && jsonFile.length() > 0) {
+            try {
+                val content = jsonFile.readText(StandardCharsets.UTF_8)
+                val jsonArray = JSONArray(content)
+                val channels = mutableListOf<TvChannel>()
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    val streamUrls = mutableListOf<String>()
+                    val streamsArr = obj.optJSONArray("streamUrls")
+                    if (streamsArr != null) {
+                        for (j in 0 until streamsArr.length()) {
+                            streamUrls.add(streamsArr.getString(j))
+                        }
+                    }
+                    val groups = mutableListOf<String>()
+                    val groupsArr = obj.optJSONArray("groups")
+                    if (groupsArr != null) {
+                        for (j in 0 until groupsArr.length()) {
+                            groups.add(groupsArr.getString(j))
+                        }
+                    }
+                    val streamUrl = obj.optString("streamUrl").takeIf { it.isNotBlank() }
+                    if (streamUrl != null && !streamUrls.contains(streamUrl)) {
+                        streamUrls.add(0, streamUrl)
+                    }
+
+                    val latency = if (obj.has("latency")) obj.getLong("latency") else null
+
+                    channels.add(
+                        TvChannel(
+                            number = obj.getInt("number"),
+                            id = obj.getString("id"),
+                            name = obj.getString("name"),
+                            logoUrl = obj.optString("logoUrl").takeIf { it.isNotBlank() },
+                            streamUrl = streamUrls.firstOrNull() ?: streamUrl,
+                            streamUrls = streamUrls,
+                            officialLivePage = obj.optString("officialLivePage").takeIf { it.isNotBlank() },
+                            xmltvId = obj.optString("xmltvId").takeIf { it.isNotBlank() },
+                            logoStatus = if (obj.optString("logoUrl").isNotBlank()) VerificationStatus.USER_PROVIDED else VerificationStatus.NOT_VERIFIED,
+                            streamStatus = VerificationStatus.USER_PROVIDED,
+                            epgStatus = if (obj.optString("xmltvId").isNotBlank()) VerificationStatus.USER_PROVIDED else VerificationStatus.NOT_VERIFIED,
+                            notes = obj.optString("notes").takeIf { it.isNotBlank() },
+                            groups = groups,
+                            lastStartupLatencyMs = latency
+                        )
+                    )
+                }
+                if (channels.isNotEmpty()) {
+                    return channels
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "JSON önbellek okunamadı: ${e.message}")
+            }
+        }
+
+        // 2. Yedek olarak M3U önbelleğini dene
         return try {
             val f = File(ctx.filesDir, CACHE_FILE).let {
                 if (it.exists() && it.length() > 0) it else File(ctx.filesDir, LEGACY_CACHE_FILE)
@@ -122,25 +262,67 @@ object PlaylistLoader {
                 parse(content).takeIf { it.isNotEmpty() }
             } else null
         } catch (e: Exception) {
-            Log.w(TAG, "Önbellek okunamadı: ${e.message}")
+            Log.w(TAG, "M3U önbellek okunamadı: ${e.message}")
             null
         }
     }
 
     /**
-     * M3U listesini internet üzerinden indirir.
-     * Öncelikli olarak `ChannelCatalog.PRIMARY_PLAYLIST_URL` kullanılır.
-     * Başarılı indirme ve ayrıştırma sonucunda içerik cihaza önbelleğe alınır.
-     * Ağ hatası veya bozuk içerik durumunda çökmez; null döndürür.
+     * Birleştirilmiş kanal listesini JSON ve M3U formatında diske kaydeder.
      */
-    fun download(ctx: Context): List<TvChannel>? {
-        val urlsToTry = ChannelCatalog.PLAYLIST_URLS
+    fun saveMergedCache(ctx: Context, channels: List<TvChannel>) {
+        try {
+            val jsonArray = JSONArray()
+            val m3uBuilder = StringBuilder("#EXTM3U\n")
 
-        for (urlStr in urlsToTry) {
+            for (ch in channels) {
+                val obj = JSONObject().apply {
+                    put("number", ch.number)
+                    put("id", ch.id)
+                    put("name", ch.name)
+                    put("logoUrl", ch.logoUrl ?: "")
+                    put("streamUrl", ch.streamUrl ?: "")
+                    put("officialLivePage", ch.officialLivePage ?: "")
+                    put("xmltvId", ch.xmltvId ?: "")
+                    put("notes", ch.notes ?: "")
+                    if (ch.lastStartupLatencyMs != null) put("latency", ch.lastStartupLatencyMs)
+
+                    val streamsArr = JSONArray()
+                    ch.streamUrls.forEach { streamsArr.put(it) }
+                    put("streamUrls", streamsArr)
+
+                    val groupsArr = JSONArray()
+                    ch.groups.forEach { groupsArr.put(it) }
+                    put("groups", groupsArr)
+                }
+                jsonArray.put(obj)
+
+                val tvgId = if (!ch.xmltvId.isNullOrBlank()) " tvg-id=\"${ch.xmltvId}\"" else ""
+                val tvgLogo = if (!ch.logoUrl.isNullOrBlank()) " tvg-logo=\"${ch.logoUrl}\"" else ""
+                val groupTitle = if (ch.groups.isNotEmpty()) " group-title=\"${ch.groups.joinToString(";")}\"" else ""
+                m3uBuilder.append("#EXTINF:-1$tvgId$tvgLogo$groupTitle,${ch.name}\n")
+                m3uBuilder.append("${ch.streamUrl ?: ""}\n")
+            }
+
+            File(ctx.filesDir, CACHE_JSON_FILE).writeText(jsonArray.toString(), StandardCharsets.UTF_8)
+            File(ctx.filesDir, CACHE_FILE).writeText(m3uBuilder.toString(), StandardCharsets.UTF_8)
+        } catch (e: Exception) {
+            Log.w(TAG, "Önbellek diske kaydedilemedi: ${e.message}")
+        }
+    }
+
+    /**
+     * Belirtilen 3 listeyi indirir (iptv-org birincil, diğerleri yedek), hepsini birleştirir,
+     * çoklu akış adreslerini gruplar ve önbelleğe yazar.
+     */
+    fun downloadAndMergeAll(ctx: Context): List<TvChannel>? {
+        val downloadedLists = mutableListOf<List<TvChannel>>()
+
+        for (urlStr in ChannelCatalog.PLAYLIST_URLS) {
             try {
                 val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 15000
-                    readTimeout = 25000
+                    connectTimeout = 12000
+                    readTimeout = 22000
                     requestMethod = "GET"
                     instanceFollowRedirects = true
                     setRequestProperty("User-Agent", "CNDNTV/1.0 AndroidTV")
@@ -164,14 +346,8 @@ object PlaylistLoader {
                     if (content.isNotBlank()) {
                         val parsed = parse(content)
                         if (parsed.isNotEmpty()) {
-                            // Başarılı listeyi güvenli şekilde önbelleğe kaydet
-                            try {
-                                val cacheFile = File(ctx.filesDir, CACHE_FILE)
-                                cacheFile.writeText(content, StandardCharsets.UTF_8)
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Önbelleğe kaydedilemedi: ${e.message}")
-                            }
-                            return parsed
+                            Log.i(TAG, "Liste başarıyla indirildi: $urlStr (${parsed.size} kanal)")
+                            downloadedLists.add(parsed)
                         }
                     }
                 } else {
@@ -183,6 +359,19 @@ object PlaylistLoader {
             }
         }
 
+        if (downloadedLists.isEmpty()) return null
+
+        val merged = mergeChannelLists(downloadedLists, ctx)
+        if (merged.isNotEmpty()) {
+            saveMergedCache(ctx, merged)
+            return merged
+        }
+
         return null
     }
+
+    /**
+     * Geriye dönük uyumluluk için download() metodu downloadAndMergeAll()'a yönlendirilir.
+     */
+    fun download(ctx: Context): List<TvChannel>? = downloadAndMergeAll(ctx)
 }
