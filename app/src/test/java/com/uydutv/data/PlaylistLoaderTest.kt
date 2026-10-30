@@ -141,4 +141,60 @@ class PlaylistLoaderTest {
         assertFalse(parsed.any { it.name.contains("beIN", ignoreCase = true) })
         assertFalse(parsed.any { it.name.contains("Digiturk", ignoreCase = true) })
     }
+
+    @Test
+    fun testFourSourcesConfigurationAndMerging() {
+        assertEquals(4, ChannelCatalog.PLAYLIST_URLS.size)
+        assertEquals("https://iptv-org.github.io/iptv/countries/tr.m3u", ChannelCatalog.PLAYLIST_URLS[0])
+        assertEquals("https://iptv-org.github.io/iptv/languages/tur.m3u", ChannelCatalog.PLAYLIST_URLS[1])
+        assertEquals("https://streams.uzunmuhalefet.com/lists/tr.m3u", ChannelCatalog.PLAYLIST_URLS[2])
+        assertEquals("https://iptv-org.github.io/iptv/countries/tr.m3u", ChannelCatalog.PLAYLIST_URLS[3])
+        assertEquals(ChannelCatalog.FOURTH_PLAYLIST_URL, ChannelCatalog.PLAYLIST_URLS[3])
+    }
+
+    @Test
+    fun testOfficialCatalogMatchAndFallbackPageInheritance() {
+        val m3u = """
+            #EXTM3U
+            #EXTINF:-1,TRT 1
+            https://live.example.com/trt1.m3u8
+            #EXTINF:-1,NTV
+            https://live.example.com/ntv.m3u8
+        """.trimIndent()
+
+        val parsed = PlaylistLoader.parse(m3u)
+        val trt1 = parsed.firstOrNull { it.name.contains("TRT 1") }
+        assertNotNull(trt1)
+        assertEquals("https://www.trtizle.com/canli/tv/trt-1", trt1?.officialLivePage)
+        assertTrue(trt1?.isFreeAccess == true)
+        assertEquals("2026-10-30", trt1?.lastCheckDate)
+
+        val ntv = parsed.firstOrNull { it.name.contains("NTV") }
+        assertNotNull(ntv)
+        assertEquals("https://www.ntv.com.tr/canli-yayin", ntv?.officialLivePage)
+        assertTrue(ntv?.isFreeAccess == true)
+    }
+
+    @Test
+    fun testTurkishCatalogCoversAllRequiredCategories() {
+        val builtIn = ChannelCatalog.builtIn
+        assertTrue(builtIn.size >= 40)
+
+        // Ulusal, Haber, Spor, Çocuk, Belgesel, Yerel kategorilerinin tümü mevcut olmalı
+        val categories = ChannelCatalog.categories()
+        assertTrue(categories.contains("Ulusal"))
+        assertTrue(categories.contains("Haber"))
+        assertTrue(categories.contains("Spor"))
+        assertTrue(categories.contains("Çocuk"))
+        assertTrue(categories.contains("Belgesel"))
+        assertTrue(categories.contains("Yerel"))
+
+        for (channel in builtIn) {
+            assertTrue("Kanal adı boş olamaz: ${channel.name}", channel.name.isNotBlank())
+            assertTrue("Resmî canlı yayın sayfası boş olamaz: ${channel.name}", !channel.officialLivePage.isNullOrBlank())
+            assertTrue("Resmî sayfa http/https ile başlamalı: ${channel.officialLivePage}", channel.officialLivePage!!.startsWith("http"))
+            assertTrue("Tüm kanallar ücretsiz erişim (FTA) olmalı: ${channel.name}", channel.isFreeAccess)
+            assertTrue("İzin durumu belirtilmeli: ${channel.name}", channel.permissionStatus.isNotBlank())
+        }
+    }
 }

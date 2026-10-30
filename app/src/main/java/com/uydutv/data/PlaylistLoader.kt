@@ -110,20 +110,26 @@ object PlaylistLoader {
                     if (name.isNotBlank() && isPlayableUrl && isAllowed && seenUrls.add(streamUrl)) {
                         val n = out.size + 1
                         val cleanId = "ch_${Math.abs(streamUrl.hashCode().toLong())}_$n"
+                        val catalogMatch = ChannelCatalog.findOfficialChannel(name)
                         out.add(
                             TvChannel(
                                 number = n,
                                 id = cleanId,
                                 name = name,
-                                logoUrl = logo,
+                                logoUrl = logo ?: catalogMatch?.logoUrl,
                                 streamUrl = streamUrl,
                                 streamUrls = listOf(streamUrl),
-                                xmltvId = tvgId,
-                                logoStatus = if (logo != null) VerificationStatus.USER_PROVIDED else VerificationStatus.NOT_VERIFIED,
+                                officialLivePage = catalogMatch?.officialLivePage,
+                                xmltvId = tvgId ?: catalogMatch?.xmltvId,
+                                logoStatus = if (logo != null) VerificationStatus.USER_PROVIDED else (catalogMatch?.logoStatus ?: VerificationStatus.NOT_VERIFIED),
                                 streamStatus = VerificationStatus.USER_PROVIDED,
-                                epgStatus = if (tvgId != null) VerificationStatus.USER_PROVIDED else VerificationStatus.NOT_VERIFIED,
+                                epgStatus = if (tvgId != null) VerificationStatus.USER_PROVIDED else (catalogMatch?.epgStatus ?: VerificationStatus.NOT_VERIFIED),
                                 notes = "M3U akışı",
-                                groups = groups
+                                groups = if (groups.isNotEmpty()) groups else (catalogMatch?.groups ?: emptyList()),
+                                isFreeAccess = true,
+                                permissionStatus = catalogMatch?.permissionStatus ?: "M3U Yayını (FTA / Serbest)",
+                                sourceOrigin = "M3U Kaynağı",
+                                lastCheckDate = catalogMatch?.lastCheckDate ?: "2026-10-30"
                             )
                         )
                     }
@@ -181,11 +187,16 @@ object PlaylistLoader {
                 allStreams
             }
 
-            val allGroups = groupChannels.flatMap { it.groups }.distinct()
-            val xmltv = groupChannels.mapNotNull { it.xmltvId }.firstOrNull { it.isNotBlank() }
-            val logo = groupChannels.mapNotNull { it.logoUrl }.firstOrNull { it.isNotBlank() }
-            val official = groupChannels.mapNotNull { it.officialLivePage }.firstOrNull()
+            val catalogMatch = ChannelCatalog.findOfficialChannel(primary.name)
+            val allGroups = (groupChannels.flatMap { it.groups } + (catalogMatch?.groups ?: emptyList())).distinct()
+            val xmltv = groupChannels.mapNotNull { it.xmltvId }.firstOrNull { it.isNotBlank() } ?: catalogMatch?.xmltvId
+            val logo = groupChannels.mapNotNull { it.logoUrl }.firstOrNull { it.isNotBlank() } ?: catalogMatch?.logoUrl
+            val official = groupChannels.mapNotNull { it.officialLivePage }.firstOrNull { it.isNotBlank() } ?: catalogMatch?.officialLivePage
             val latency = if (ctx != null) StreamHealthManager.getChannelLatency(ctx, primary.id) else primary.lastStartupLatencyMs
+            val freeAccess = catalogMatch?.isFreeAccess ?: primary.isFreeAccess
+            val permStatus = catalogMatch?.permissionStatus ?: primary.permissionStatus
+            val origin = catalogMatch?.sourceOrigin ?: primary.sourceOrigin ?: "M3U Yayın Kaynağı (Doğrudan)"
+            val checkDate = catalogMatch?.lastCheckDate ?: primary.lastCheckDate
 
             val mergedChannel = primary.copy(
                 streamUrl = sortedStreams.firstOrNull(),
@@ -195,7 +206,11 @@ object PlaylistLoader {
                 officialLivePage = official,
                 groups = allGroups,
                 lastStartupLatencyMs = latency,
-                streamStatus = VerificationStatus.USER_PROVIDED
+                isFreeAccess = freeAccess,
+                permissionStatus = permStatus,
+                sourceOrigin = origin,
+                lastCheckDate = checkDate,
+                streamStatus = if (sortedStreams.isNotEmpty()) VerificationStatus.USER_PROVIDED else VerificationStatus.PERMISSION_NOT_CONFIRMED
             )
             result.add(mergedChannel)
         }
@@ -240,6 +255,11 @@ object PlaylistLoader {
 
                     val rawName = obj.getString("name")
                     val cleanedName = cleanChannelName(rawName)
+                    val officialLivePage = obj.optString("officialLivePage").takeIf { it.isNotBlank() }
+                    val isFreeAccess = if (obj.has("isFreeAccess")) obj.getBoolean("isFreeAccess") else true
+                    val permissionStatus = obj.optString("permissionStatus").takeIf { it.isNotBlank() } ?: "Resmî Yayın / FTA"
+                    val sourceOrigin = obj.optString("sourceOrigin").takeIf { it.isNotBlank() }
+                    val lastCheckDate = obj.optString("lastCheckDate").takeIf { it.isNotBlank() } ?: "2026-10-30"
 
                     channels.add(
                         TvChannel(
@@ -249,14 +269,18 @@ object PlaylistLoader {
                             logoUrl = obj.optString("logoUrl").takeIf { it.isNotBlank() },
                             streamUrl = streamUrls.firstOrNull() ?: streamUrl,
                             streamUrls = streamUrls,
-                            officialLivePage = obj.optString("officialLivePage").takeIf { it.isNotBlank() },
+                            officialLivePage = officialLivePage,
                             xmltvId = obj.optString("xmltvId").takeIf { it.isNotBlank() },
                             logoStatus = if (obj.optString("logoUrl").isNotBlank()) VerificationStatus.USER_PROVIDED else VerificationStatus.NOT_VERIFIED,
                             streamStatus = VerificationStatus.USER_PROVIDED,
                             epgStatus = if (obj.optString("xmltvId").isNotBlank()) VerificationStatus.USER_PROVIDED else VerificationStatus.NOT_VERIFIED,
                             notes = obj.optString("notes").takeIf { it.isNotBlank() },
                             groups = groups,
-                            lastStartupLatencyMs = latency
+                            lastStartupLatencyMs = latency,
+                            isFreeAccess = isFreeAccess,
+                            permissionStatus = permissionStatus,
+                            sourceOrigin = sourceOrigin,
+                            lastCheckDate = lastCheckDate
                         )
                     )
                 }
@@ -302,6 +326,10 @@ object PlaylistLoader {
                     put("officialLivePage", ch.officialLivePage ?: "")
                     put("xmltvId", ch.xmltvId ?: "")
                     put("notes", ch.notes ?: "")
+                    put("isFreeAccess", ch.isFreeAccess)
+                    put("permissionStatus", ch.permissionStatus)
+                    put("sourceOrigin", ch.sourceOrigin ?: "")
+                    put("lastCheckDate", ch.lastCheckDate)
                     if (ch.lastStartupLatencyMs != null) put("latency", ch.lastStartupLatencyMs)
 
                     val streamsArr = JSONArray()
@@ -329,7 +357,7 @@ object PlaylistLoader {
     }
 
     /**
-     * Belirtilen 3 listeyi indirir (iptv-org birincil, diğerleri yedek), hepsini birleştirir,
+     * Belirtilen 4 listeyi indirir (iptv-org ve diğer kaynaklar), hepsini birleştirir,
      * çoklu akış adreslerini gruplar ve önbelleğe yazar.
      */
     fun downloadAndMergeAll(ctx: Context): List<TvChannel>? {

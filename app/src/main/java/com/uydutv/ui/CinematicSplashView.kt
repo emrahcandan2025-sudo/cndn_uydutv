@@ -42,7 +42,7 @@ class CinematicSplashView(
     private var isCompleted = false
 
     private val bgPaint = Paint().apply {
-        color = Color.parseColor("#060813")
+        color = Color.parseColor("#101A30")
         style = Paint.Style.FILL
     }
 
@@ -173,11 +173,12 @@ class CinematicSplashView(
             glowPaint.shader = RadialGradient(
                 cx, cy, glowRadius,
                 intArrayOf(
-                    Color.argb((70 * glowAlpha).toInt(), 255, 150, 0),
-                    Color.argb((35 * glowAlpha).toInt(), 0, 180, 255),
+                    Color.argb((90 * glowAlpha).toInt(), 41, 156, 255), // Elektrik mavisi #299CFF
+                    Color.argb((60 * glowAlpha).toInt(), 40, 217, 197), // Turkuaz #28D9C5
+                    Color.argb((35 * glowAlpha).toInt(), 155, 112, 245), // Mor #9B70F5
                     Color.TRANSPARENT
                 ),
-                floatArrayOf(0.0f, 0.5f, 1.0f),
+                floatArrayOf(0.0f, 0.4f, 0.75f, 1.0f),
                 Shader.TileMode.CLAMP
             )
             canvas.drawCircle(cx, cy, glowRadius, glowPaint)
@@ -200,20 +201,20 @@ class CinematicSplashView(
             val partialPath = Path()
             tvMeasure.getSegment(0f, currentLength, partialPath, true)
 
-            // Turuncu ve mavi çift gradyan şeritler
+            // Elektrik mavisi ve turkuaz çift gradyan şeritler
             ribbonPaintOrange.strokeWidth = strokeW
             ribbonPaintOrange.shader = LinearGradient(
                 rect.left, rect.top, rect.right, rect.top,
-                Color.parseColor("#FF6D00"), Color.parseColor("#FFD54F"),
+                Color.parseColor("#299CFF"), Color.parseColor("#28D9C5"),
                 Shader.TileMode.CLAMP
             )
             canvas.drawPath(partialPath, ribbonPaintOrange)
 
-            // Alt kıvrımda mavi / camgöbeği ışıltı
+            // Alt kıvrımda turkuaz / mor ışıltı
             ribbonPaintBlue.strokeWidth = strokeW * 0.9f
             ribbonPaintBlue.shader = LinearGradient(
                 rect.left, rect.bottom, rect.right, rect.bottom,
-                Color.parseColor("#00E5FF"), Color.parseColor("#2979FF"),
+                Color.parseColor("#28D9C5"), Color.parseColor("#9B70F5"),
                 Shader.TileMode.CLAMP
             )
             val blueSegment = Path()
@@ -231,14 +232,14 @@ class CinematicSplashView(
             val antLen = 58f * scale * antennaProgress
             antennaPaint.strokeWidth = 6f * scale
 
-            // Sol anten
-            antennaPaint.color = Color.parseColor("#FFA000")
+            // Sol anten (Turkuaz)
+            antennaPaint.color = Color.parseColor("#28D9C5")
             val leftEndX = cx - 18f * scale - (antLen * 0.65f)
             val leftEndY = antY - (antLen * 0.75f)
             canvas.drawLine(cx - 18f * scale, antY, leftEndX, leftEndY, antennaPaint)
 
-            // Sağ anten
-            antennaPaint.color = Color.parseColor("#00E5FF")
+            // Sağ anten (Elektrik mavisi)
+            antennaPaint.color = Color.parseColor("#299CFF")
             val rightEndX = cx + 18f * scale + (antLen * 0.65f)
             val rightEndY = antY - (antLen * 0.75f)
             canvas.drawLine(cx + 18f * scale, antY, rightEndX, rightEndY, antennaPaint)
@@ -247,9 +248,9 @@ class CinematicSplashView(
             if (antennaProgress > 0.5f) {
                 val tipAlpha = ((antennaProgress - 0.5f) / 0.5f).coerceIn(0f, 1f)
                 val tipRadius = 9f * scale * tipAlpha
-                antennaTipPaint.color = Color.argb((255 * tipAlpha).toInt(), 255, 170, 0)
+                antennaTipPaint.color = Color.argb((255 * tipAlpha).toInt(), 40, 217, 197)
                 canvas.drawCircle(leftEndX, leftEndY, tipRadius, antennaTipPaint)
-                antennaTipPaint.color = Color.argb((255 * tipAlpha).toInt(), 0, 230, 255)
+                antennaTipPaint.color = Color.argb((255 * tipAlpha).toInt(), 41, 156, 255)
                 canvas.drawCircle(rightEndX, rightEndY, tipRadius, antennaTipPaint)
             }
         }
@@ -267,7 +268,7 @@ class CinematicSplashView(
             }
             playPaint.shader = LinearGradient(
                 cx - pSize, cy - pSize, cx + pSize, cy + pSize,
-                Color.parseColor("#FFD54F"), Color.parseColor("#FF6D00"),
+                Color.parseColor("#28D9C5"), Color.parseColor("#299CFF"),
                 Shader.TileMode.CLAMP
             )
             canvas.drawPath(playPath, playPaint)
@@ -289,7 +290,7 @@ class CinematicSplashView(
                 textPaintOrange.textSize = textSize
                 textPaintOrange.shader = LinearGradient(
                     cx, 0f, cx + 80f * scale, 0f,
-                    Color.parseColor("#FFD54F"), Color.parseColor("#FF6D00"),
+                    Color.parseColor("#299CFF"), Color.parseColor("#28D9C5"),
                     Shader.TileMode.CLAMP
                 )
                 val textY = cy + tvHeight / 2f + 56f * scale

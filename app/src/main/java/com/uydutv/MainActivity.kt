@@ -1,9 +1,11 @@
 package com.uydutv
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -58,10 +60,31 @@ class MainActivity : Activity() {
     private lateinit var infoPanel: LinearLayout
     private lateinit var guidePanel: LinearLayout
     private lateinit var statusText: TextView
+    private lateinit var loadingLogo: ImageView
     private lateinit var infoTitle: TextView
     private lateinit var infoSubtitle: TextView
     private lateinit var guideRows: LinearLayout
     private lateinit var guideTitle: TextView
+
+    private fun showLoadingLogo() {
+        statusText.visibility = View.GONE
+        loadingLogo.visibility = View.VISIBLE
+        loadingLogo.animate().cancel()
+        loadingLogo.alpha = 0f
+        loadingLogo.scaleX = 0.88f
+        loadingLogo.scaleY = 0.88f
+        loadingLogo.animate()
+            .alpha(1.0f)
+            .scaleX(1.0f)
+            .scaleY(1.0f)
+            .setDuration(220)
+            .start()
+    }
+
+    private fun hideLoadingLogo() {
+        loadingLogo.animate().cancel()
+        loadingLogo.visibility = View.GONE
+    }
 
     private var player: ExoPlayer? = null
     private var channelIndex = 0
@@ -116,14 +139,26 @@ class MainActivity : Activity() {
         }
     }
 
-    private val bg = Color.rgb(5, 10, 19)
-    private val accent = Color.rgb(0, 174, 255)
-    private val selectedRow = Color.rgb(8, 61, 96)
-    private val mutedText = Color.rgb(166, 184, 207)
+    // Premium Renk Paleti (CNDN TV)
+    private val colorBgDark = Color.parseColor("#101A30")      // Ana arka plan: Koyu lacivert
+    private val colorBgSecondary = Color.parseColor("#17243D") // İkincil arka plan: Gece mavisi
+    private val colorAccent = Color.parseColor("#299CFF")      // Ana vurgu: Elektrik mavisi
+    private val colorTurquoise = Color.parseColor("#28D9C5")   // İkincil vurgu: Turkuaz
+    private val colorPurple = Color.parseColor("#9B70F5")      // Tamamlayıcı renk: Mor
+    private val colorTextWhite = Color.parseColor("#FFFFFF")   // Metin: Beyaz
+    private val colorTextLight = Color.parseColor("#E2E8F0")   // Metin: Açık gri
+    private val colorTextMuted = Color.parseColor("#94A3B8")   // Metin: Soluk gri
+    private val colorBorderSubtle = Color.parseColor("#1E2E4A") // İnce ayrım çizgisi
+
+    private val bg = colorBgDark
+    private val accent = colorAccent
+    private val selectedRow = Color.argb(220, 25, 95, 170)
+    private val mutedText = colorTextMuted
 
     data class Program(val channelId: String, val title: String, val start: Long, val end: Long)
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+    private fun dp(v: Float): Int = (v * resources.displayMetrics.density).toInt()
 
     private fun runOnWorker(block: () -> Unit) {
         try { worker.execute(block) } catch (_: RejectedExecutionException) { /* activity kapanıyor */ }
@@ -235,18 +270,13 @@ class MainActivity : Activity() {
                         ChannelCatalog.prioritizeStream(currentChannel.id, currentStream)
                         ChannelCatalog.updateChannelLatency(currentChannel.id, latency)
                     }
+                    hideLoadingLogo()
                     statusText.visibility = View.GONE
                     retryCount = 0
                     skipChain = 0
-                    showChannelInfo(loadLatencyMs = latency)
+                    showChannelInfo()
                 } else if (playbackState == Player.STATE_BUFFERING && ChannelCatalog.playableStream(currentChannel) != null) {
-                    val totalStreams = currentChannel.streamUrls.size
-                    statusText.text = if (totalStreams > 1) {
-                        "Canlı yayın yükleniyor… (Kaynak ${streamAttemptIndex + 1}/$totalStreams)"
-                    } else {
-                        "Canlı yayın yükleniyor…"
-                    }
-                    statusText.visibility = View.VISIBLE
+                    showLoadingLogo()
                 }
             }
         })
@@ -276,10 +306,12 @@ class MainActivity : Activity() {
     /**
      * Oynatma hatası yönetimi:
      * - Aynı kanalı en fazla MAX_RETRY kez dene.
+     * - Başarısızlık durumunda kanalın resmî canlı yayın sayfasını yedek olarak sun.
      * - Sonsuz döngüyü önlemek için ardışık kanal atlamasını MAX_SKIP_CHAIN (2) ile sınırla.
      * - Hata sebebini kullanıcıya anlaşılır şekilde göster.
      */
     private fun handlePlayerError(error: PlaybackException? = null) {
+        hideLoadingLogo()
         handler.removeCallbacks(retryRunnable)
         handler.removeCallbacks(skipRunnable)
         retryCount++
@@ -298,16 +330,32 @@ class MainActivity : Activity() {
                 statusText.text = "$reason · Yeniden deneniyor ($retryCount/$MAX_RETRY)"
                 handler.postDelayed(retryRunnable, 3000)
             }
-            skipChain < MAX_SKIP_CHAIN && total > 1 -> {
-                skipChain++
-                statusText.text = "Bu kanal yanıt vermiyor · Sonraki kanala geçiliyor ($skipChain/$MAX_SKIP_CHAIN)"
-                handler.postDelayed(skipRunnable, 1500)
-            }
             else -> {
-                statusText.text = "$reason\nYayın bağlantısı kurulamadı. Lütfen internetinizi kontrol edin veya kumanda ile başka bir kanal seçin."
+                val officialPage = currentChannel.officialLivePage
+                if (!officialPage.isNullOrBlank()) {
+                    statusText.text = "$reason\nDoğrudan yayın açılamadı.\n\nResmî Canlı Yayın Sayfası (Yedek):\n$officialPage\n\n(Kumandadan OK tuşuna basarak sayfayı açabilirsiniz)"
+                } else if (skipChain < MAX_SKIP_CHAIN && total > 1) {
+                    skipChain++
+                    statusText.text = "Bu kanal yanıt vermiyor · Sonraki kanala geçiliyor ($skipChain/$MAX_SKIP_CHAIN)"
+                    handler.postDelayed(skipRunnable, 1500)
+                } else {
+                    statusText.text = "$reason\nYayın bağlantısı kurulamadı. Lütfen internetinizi kontrol edin veya kumanda ile başka bir kanal seçin."
+                }
             }
         }
         statusText.visibility = View.VISIBLE
+    }
+
+    private fun openOfficialWebPage(url: String?) {
+        if (url.isNullOrBlank()) return
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Tarayıcı açılamadı: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
 
     /**
@@ -368,7 +416,7 @@ class MainActivity : Activity() {
 
     private fun buildUi() {
         root = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
+            setBackgroundColor(colorBgDark)
             isFocusableInTouchMode = true
             setOnClickListener {
                 if (guideVisible) {
@@ -383,7 +431,7 @@ class MainActivity : Activity() {
         playerView = PlayerView(this).apply {
             useController = false
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-            setShutterBackgroundColor(Color.BLACK)
+            setShutterBackgroundColor(colorBgDark)
             layoutParams = FrameLayout.LayoutParams(-1, -1)
             setOnClickListener {
                 if (guideVisible) {
@@ -397,50 +445,132 @@ class MainActivity : Activity() {
         }
         root.addView(playerView)
         flash = View(this).apply {
-            setBackgroundColor(Color.argb(95, 0, 0, 0))
+            setBackgroundColor(Color.argb(85, 0, 0, 0))
             visibility = View.GONE
         }
         root.addView(flash, FrameLayout.LayoutParams(-1, -1))
-        statusText = text("CNDN TV  ·  Yayın kaynağı bekleniyor", 22f, Color.WHITE, true).apply {
-            setBackgroundColor(Color.argb(220, 7, 16, 29))
-            setPadding(dp(22), dp(16), dp(22), dp(16))
-            visibility = View.VISIBLE
+
+        statusText = text("CNDN TV", 18f, colorTextWhite, true).apply {
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(Color.parseColor("#F517243D"), Color.parseColor("#F5101A30"))
+            ).apply {
+                cornerRadius = dp(16).toFloat()
+                setStroke(dp(1.8f), colorAccent)
+            }
+            setPadding(dp(26), dp(18), dp(26), dp(18))
+            elevation = dp(12).toFloat()
+            visibility = View.GONE
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                val official = currentChannel.officialLivePage
+                if (!official.isNullOrBlank()) {
+                    openOfficialWebPage(official)
+                }
+            }
         }
         root.addView(statusText, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
+
+        loadingLogo = ImageView(this).apply {
+            setImageResource(R.drawable.cndn_logo)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            visibility = View.GONE
+        }
+        root.addView(loadingLogo, FrameLayout.LayoutParams(dp(110), dp(110), Gravity.CENTER))
+
         infoPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(34), dp(20), dp(34), dp(22))
-            setBackgroundColor(Color.argb(225, 5, 12, 23))
+            setPadding(dp(30), dp(18), dp(30), dp(20))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(Color.parseColor("#F617243D"), Color.parseColor("#F0101A30"))
+            ).apply {
+                cornerRadius = dp(20).toFloat()
+                setStroke(dp(1.8f), colorAccent)
+            }
+            elevation = dp(16).toFloat()
             setOnClickListener { openGuide() }
         }
-        infoTitle = text("", 30f, Color.WHITE, true)
-        infoSubtitle = text("", 18f, mutedText, false)
+        infoTitle = text("", 27f, colorTextWhite, true).apply {
+            letterSpacing = 0.02f
+        }
+        infoSubtitle = text("", 16f, colorTextLight, false).apply {
+            setPadding(0, dp(4), 0, 0)
+        }
         infoPanel.addView(infoTitle)
         infoPanel.addView(infoSubtitle)
-        root.addView(infoPanel, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+        root.addView(infoPanel, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
+            marginStart = dp(32)
+            marginEnd = dp(32)
+            bottomMargin = dp(24)
+        })
+
         guidePanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(22), dp(24), dp(18), dp(20))
-            setBackgroundColor(Color.argb(248, 5, 13, 25))
+            setPadding(dp(20), dp(22), dp(18), dp(20))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(Color.parseColor("#FC101A30"), Color.parseColor("#F817243D"))
+            ).apply {
+                setStroke(dp(1.5f), colorBorderSubtle)
+            }
             visibility = View.GONE
-            elevation = dp(18).toFloat()
+            elevation = dp(20).toFloat()
         }
-        guidePanel.addView(text("CNDN  |  IPTV", 17f, accent, true).apply {
-            letterSpacing = 0.12f
-            setPadding(dp(10), dp(4), dp(10), dp(16))
-        })
-        guideTitle = text("KANALLAR", 27f, Color.WHITE, true).apply {
-            setPadding(dp(10), dp(6), dp(10), dp(10))
+
+        // Üst Başlık & CNDN TV Marka Rozeti
+        val headerTagLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(6), dp(2), dp(6), dp(12))
+        }
+        val appTitle = text("CNDN TV", 16f, colorAccent, true).apply {
+            letterSpacing = 0.14f
+        }
+        val badgeTag = TextView(this).apply {
+            text = "CANLI REHBER"
+            textSize = 11f
+            setTextColor(colorTurquoise)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(3), dp(8), dp(3))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(6).toFloat()
+                setColor(Color.argb(120, 23, 36, 61))
+                setStroke(dp(1), Color.argb(140, 40, 217, 197))
+            }
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) }
+        }
+        headerTagLayout.addView(appTitle)
+        headerTagLayout.addView(badgeTag)
+        guidePanel.addView(headerTagLayout)
+
+        // Kategori Başlık Kutusu
+        guideTitle = text("KANALLAR", 21f, colorTextWhite, true).apply {
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(Color.parseColor("#3517243D"), Color.parseColor("#45299CFF"))
+            ).apply {
+                cornerRadius = dp(14).toFloat()
+                setStroke(dp(1.5f), colorTurquoise)
+            }
             isClickable = true
             setOnClickListener { cycleCategory(1) }
         }
         guidePanel.addView(guideTitle)
-        guidePanel.addView(text("◂  Kategori değiştir   ·   OK: İzle   ·   GERİ: Kapat", 14f, mutedText, false).apply {
-            setPadding(dp(10), 0, dp(10), dp(18))
+
+        guidePanel.addView(text("◂  Kategori değiştir   ·   OK: İzle   ·   GERİ: Kapat", 13f, colorTextMuted, false).apply {
+            setPadding(dp(8), dp(10), dp(8), dp(14))
             isClickable = true
             setOnClickListener { cycleCategory(1) }
         })
-        val scroller = ScrollView(this).apply { clipToPadding = false }
+
+        val scroller = ScrollView(this).apply {
+            clipToPadding = false
+            isVerticalScrollBarEnabled = false
+        }
         guideRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroller.addView(guideRows)
         guidePanel.addView(scroller, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -450,7 +580,7 @@ class MainActivity : Activity() {
 
     private fun text(value: String, size: Float, color: Int, bold: Boolean): TextView = TextView(this).apply {
         text = value; textSize = size; setTextColor(color); typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-        setPadding(8); gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(2), dp(2), dp(2), dp(2)); gravity = Gravity.CENTER_VERTICAL
     }
 
     /**
@@ -476,10 +606,16 @@ class MainActivity : Activity() {
         val streams = if (channel.streamUrls.isNotEmpty()) channel.streamUrls else listOfNotNull(channel.streamUrl)
 
         if (streams.isEmpty() || streamAttemptIndex >= streams.size) {
+            hideLoadingLogo()
             player?.stop()
             player?.clearMediaItems()
             if (streams.isEmpty()) {
-                statusText.text = "${channel.name}\nDoğrudan yayın adresi ve kullanım izni doğrulanmadı.\nKanal kaynağı yapılandırıldığında canlı yayın başlayacak."
+                val official = channel.officialLivePage
+                if (!official.isNullOrBlank()) {
+                    statusText.text = "${channel.name}\nDoğrudan HLS/M3U yayın adresi doğrulanmadı.\n\nResmî Canlı Yayın Sayfası (Yedek):\n$official\n\n(Kumandadan OK tuşuna basarak sayfayı açabilirsiniz)"
+                } else {
+                    statusText.text = "${channel.name}\nDoğrudan yayın adresi ve kullanım izni doğrulanmadı.\nKanal kaynağı yapılandırıldığında canlı yayın başlayacak."
+                }
                 statusText.visibility = View.VISIBLE
             } else {
                 handlePlayerError()
@@ -492,13 +628,7 @@ class MainActivity : Activity() {
         activePlayingStream = stream
         streamStartTime = SystemClock.elapsedRealtime()
 
-        val totalStreams = streams.size
-        statusText.text = if (totalStreams > 1) {
-            "Canlı yayın yükleniyor… (Kaynak ${streamAttemptIndex + 1}/$totalStreams)"
-        } else {
-            "Canlı yayın yükleniyor…"
-        }
-        statusText.visibility = View.VISIBLE
+        showLoadingLogo()
         showChannelInfo()
 
         try {
@@ -531,10 +661,8 @@ class MainActivity : Activity() {
 
     private fun showChannelInfo(loadLatencyMs: Long? = null) {
         val c = currentChannel
-        val latency = loadLatencyMs ?: c.lastStartupLatencyMs ?: StreamHealthManager.getChannelLatency(this, c.id)
-        val latencyStr = if (latency != null && latency > 0) "   ⚡ ${latency}ms" else ""
         val totalStreams = c.streamUrls.size
-        val streamStr = if (totalStreams > 1) "   [K.${streamAttemptIndex + 1}/$totalStreams]" else ""
+        val streamStr = if (totalStreams > 1) "   [Kaynak ${streamAttemptIndex + 1}/$totalStreams]" else ""
 
         infoTitle.text = String.format(Locale.getDefault(), "%03d   %s%s", c.number, c.name, streamStr)
         val now = System.currentTimeMillis()
@@ -543,9 +671,9 @@ class MainActivity : Activity() {
         infoSubtitle.text = if (cur != null) {
             val timeFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
             val curTime = "${timeFmt.format(Date(cur.start))} - ${timeFmt.format(Date(cur.end))}"
-            "${cur.title} ($curTime)$latencyStr   ·   Sonraki: ${next?.title ?: "—"}"
+            "● CANLI   ${cur.title} ($curTime)   ·   Sonraki: ${next?.title ?: "—"}"
         } else {
-            "Canlı Yayın$latencyStr   ·   Program bilgisi bulunamadı"
+            "● CANLI YAYIN   ·   Program rehberi bilgisi aranıyor"
         }
         infoPanel.visibility = View.VISIBLE
         overlayVisible = true
@@ -563,28 +691,75 @@ class MainActivity : Activity() {
     private fun findNextProgram(c: TvChannel, now: Long): Program? = programsFor(c)?.firstOrNull { it.start > now }
 
     private fun cell(value: String, widthPx: Int, bold: Boolean): TextView =
-        text(value, 20f, Color.WHITE, bold).apply {
+        text(value, 20f, colorTextWhite, bold).apply {
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
             layoutParams = if (widthPx > 0) LinearLayout.LayoutParams(widthPx, -2) else LinearLayout.LayoutParams(0, -2, 1f)
         }
 
-    /** Bölünmüş ekran: sol %38 kanal listesi, sağda 16:9 önizleme + altında kanal bilgisi. */
+    /** Bölünmüş ekran: sol %40 kanal listesi, sağda 16:9 önizleme + altında kanal bilgisi. */
     private fun applyLayout(split: Boolean) {
         val w = resources.displayMetrics.widthPixels
         if (split) {
-            val pw = (w * 0.56f).toInt()
+            val pw = (w * 0.54f).toInt()
             val ph = pw * 9 / 16
             playerView.layoutParams = FrameLayout.LayoutParams(pw, ph, Gravity.END or Gravity.CENTER_VERTICAL).apply { marginEnd = dp(24) }
-            infoPanel.layoutParams = FrameLayout.LayoutParams(pw, -2, Gravity.END or Gravity.BOTTOM).apply { marginEnd = dp(24); bottomMargin = dp(36) }
-            guidePanel.layoutParams = FrameLayout.LayoutParams((w * 0.38f).toInt(), -1, Gravity.START)
+            infoPanel.layoutParams = FrameLayout.LayoutParams(pw, -2, Gravity.END or Gravity.BOTTOM).apply {
+                marginEnd = dp(24)
+                bottomMargin = dp(28)
+                marginStart = 0
+            }
+            guidePanel.layoutParams = FrameLayout.LayoutParams((w * 0.40f).toInt(), -1, Gravity.START)
             statusText.layoutParams = FrameLayout.LayoutParams(-2, -2, Gravity.END or Gravity.CENTER_VERTICAL).apply { marginEnd = dp(24) }
             statusText.maxWidth = pw - dp(16)
+            loadingLogo.layoutParams = FrameLayout.LayoutParams(dp(80), dp(80), Gravity.END or Gravity.CENTER_VERTICAL).apply {
+                marginEnd = dp(24) + (pw - dp(80)) / 2
+            }
         } else {
             playerView.layoutParams = FrameLayout.LayoutParams(-1, -1)
-            infoPanel.layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM)
+            infoPanel.layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
+                marginStart = dp(32)
+                marginEnd = dp(32)
+                bottomMargin = dp(24)
+            }
             statusText.layoutParams = FrameLayout.LayoutParams(-2, -2, Gravity.CENTER)
             statusText.maxWidth = Int.MAX_VALUE
+            loadingLogo.layoutParams = FrameLayout.LayoutParams(dp(110), dp(110), Gravity.CENTER)
+        }
+    }
+
+    private fun createRowBackground(isFocused: Boolean, isSelected: Boolean): GradientDrawable {
+        return if (isFocused) {
+            // Odaklanıldığında: Mavi-Turkuaz geçişli parlak vurgu ve turkuaz kenarlık
+            GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(
+                    Color.argb(235, 30, 110, 205), // Elektrik mavisi tonu
+                    Color.argb(235, 25, 175, 160)  // Turkuaz geçişi
+                )
+            ).apply {
+                cornerRadius = dp(14).toFloat()
+                setStroke(dp(2.5f), colorTurquoise)
+            }
+        } else if (isSelected) {
+            // Seçili (canlı oynatılan) kanal: Gece mavisi zemin, elektrik mavisi çerçeve
+            GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(
+                    Color.argb(180, 23, 45, 75),
+                    Color.argb(160, 20, 70, 80)
+                )
+            ).apply {
+                cornerRadius = dp(14).toFloat()
+                setStroke(dp(1.8f), colorAccent)
+            }
+        } else {
+            // Normal kanal: Koyu lacivert/gece mavisi kart tabanı, ince zarif çerçeve
+            GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat()
+                setColor(Color.argb(65, 23, 36, 61))
+                setStroke(dp(1), Color.argb(40, 255, 255, 255))
+            }
         }
     }
 
@@ -598,60 +773,113 @@ class MainActivity : Activity() {
         ChannelCatalog.channels.forEachIndexed { index, c ->
             val selected = index == channelIndex
             val current = findProgram(c, now)?.title
-            val latency = c.lastStartupLatencyMs ?: StreamHealthManager.getChannelLatency(this, c.id)
             val streamCount = c.streamUrls.size
-            val badge = buildString {
-                if (latency != null && latency > 0) append("⚡ ${latency}ms")
-                if (streamCount > 1) {
-                    if (isNotEmpty()) append(" · ")
-                    append("$streamCount kaynak")
-                }
-            }
+            val badge = if (streamCount > 1) "$streamCount kaynak" else ""
 
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(12), dp(6), dp(10), dp(6))
+                setPadding(dp(12), dp(6), dp(14), dp(6))
                 isFocusable = true; isFocusableInTouchMode = true
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(12).toFloat()
-                    setColor(if (selected) selectedRow else Color.TRANSPARENT)
-                    if (selected) setStroke(dp(2), accent)
+                background = createRowBackground(isFocused = false, isSelected = selected)
+
+                // Kanal Numarası Rozeti
+                val numBadge = TextView(context).apply {
+                    text = String.format(Locale.getDefault(), "%03d", c.number)
+                    textSize = 14f
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    setTextColor(if (selected) colorTextWhite else colorTextLight)
+                    background = GradientDrawable().apply {
+                        cornerRadius = dp(8).toFloat()
+                        if (selected) {
+                            setColor(colorAccent)
+                        } else {
+                            setColor(Color.argb(120, 16, 26, 48))
+                            setStroke(dp(1), Color.argb(60, 41, 156, 255))
+                        }
+                    }
+                    layoutParams = LinearLayout.LayoutParams(dp(44), dp(32)).apply {
+                        marginEnd = dp(12)
+                    }
                 }
-                addView(cell(String.format(Locale.getDefault(), "%03d", c.number), dp(64), selected))
+                addView(numBadge)
+
+                // Kanal Bilgileri Kolonu
                 val col = LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
                     layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
                 }
-                col.addView(text(c.name, 20f, Color.WHITE, selected).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                val nameView = text(c.name, 19f, colorTextWhite, selected).apply {
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                }
+                col.addView(nameView)
+
                 val subText = when {
                     current != null && badge.isNotEmpty() -> "$current  ·  $badge"
                     current != null -> current
                     badge.isNotEmpty() -> badge
                     else -> null
                 }
-                if (subText != null) {
-                    col.addView(text(subText, 14f, Color.LTGRAY, false).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
-                }
+                val subView = if (subText != null) {
+                    text(subText, 13f, if (selected) colorTurquoise else colorTextMuted, false).apply {
+                        maxLines = 1
+                        ellipsize = TextUtils.TruncateAt.END
+                    }.also { col.addView(it) }
+                } else null
+
                 addView(col)
+
+                // Canlı / Seçili Rozeti
+                val liveDot = TextView(context).apply {
+                    text = "●"
+                    textSize = 16f
+                    setTextColor(colorTurquoise)
+                    gravity = Gravity.CENTER
+                    visibility = if (selected) View.VISIBLE else View.GONE
+                    layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) }
+                }
+                addView(liveDot)
+
                 setOnClickListener { channelIndex = index; skipChain = 0; streamAttemptIndex = 0; closeGuide(commit = true) }
                 setOnFocusChangeListener { v, hasFocus ->
-                    v.background = GradientDrawable().apply {
-                        cornerRadius = dp(12).toFloat()
-                        setColor(if (hasFocus) selectedRow else Color.TRANSPARENT)
-                        if (hasFocus) setStroke(dp(2), accent)
-                    }
+                    v.background = createRowBackground(isFocused = hasFocus, isSelected = (index == channelIndex))
                     if (hasFocus) {
+                        v.animate().scaleX(1.025f).scaleY(1.025f).translationZ(dp(6).toFloat()).setDuration(160).start()
+                        numBadge.setTextColor(Color.parseColor("#101A30"))
+                        numBadge.background = GradientDrawable().apply {
+                            cornerRadius = dp(8).toFloat()
+                            setColor(colorTextWhite)
+                        }
+                        nameView.setTextColor(colorTextWhite)
+                        nameView.typeface = Typeface.DEFAULT_BOLD
+                        subView?.setTextColor(Color.parseColor("#F1F5F9"))
                         channelIndex = index
                         streamAttemptIndex = 0
                         showChannelInfo()
                         handler.removeCallbacks(previewRunnable)
                         handler.postDelayed(previewRunnable, 500)
+                    } else {
+                        v.animate().scaleX(1.0f).scaleY(1.0f).translationZ(0f).setDuration(160).start()
+                        val isNowSelected = (index == channelIndex)
+                        numBadge.setTextColor(if (isNowSelected) colorTextWhite else colorTextLight)
+                        numBadge.background = GradientDrawable().apply {
+                            cornerRadius = dp(8).toFloat()
+                            if (isNowSelected) {
+                                setColor(colorAccent)
+                            } else {
+                                setColor(Color.argb(120, 16, 26, 48))
+                                setStroke(dp(1), Color.argb(60, 41, 156, 255))
+                            }
+                        }
+                        nameView.setTextColor(if (isNowSelected) colorTextWhite else colorTextLight)
+                        subView?.setTextColor(if (isNowSelected) colorTurquoise else colorTextMuted)
                     }
                 }
             }
-            val rowParams = LinearLayout.LayoutParams(-1, dp(68))
-            rowParams.bottomMargin = dp(5)
+            val rowParams = LinearLayout.LayoutParams(-1, dp(64))
+            rowParams.bottomMargin = dp(6)
             guideRows.addView(row, rowParams)
         }
         guidePanel.visibility = View.VISIBLE
@@ -828,6 +1056,10 @@ class MainActivity : Activity() {
             KeyEvent.KEYCODE_GUIDE, KeyEvent.KEYCODE_G -> { openGuide(); return true }
             KeyEvent.KEYCODE_INFO, KeyEvent.KEYCODE_I -> { showChannelInfo(); return true }
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                if (statusText.visibility == View.VISIBLE && !currentChannel.officialLivePage.isNullOrBlank()) {
+                    openOfficialWebPage(currentChannel.officialLivePage)
+                    return true
+                }
                 val now = SystemClock.uptimeMillis()
                 if (now - lastOkAt < 2000) openGuide() else showChannelInfo()
                 lastOkAt = now
