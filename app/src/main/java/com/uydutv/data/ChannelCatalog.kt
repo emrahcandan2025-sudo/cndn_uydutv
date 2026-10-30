@@ -132,6 +132,18 @@ object ChannelCatalog {
         recompute()
     }
 
+    /** Kanal adını dinamik olarak günceller. */
+    fun renameChannel(channelId: String, newName: String) {
+        all = all.map { if (it.id == channelId) it.copy(name = newName) else it }
+        recompute()
+    }
+
+    /** Tüm kanal listesini ve sırasını günceller. */
+    fun updateAll(list: List<TvChannel>) {
+        all = list
+        recompute()
+    }
+
     private val categoryOrder = listOf(
         "General", "News", "Sports", "Movies", "Series", "Entertainment", "Kids", "Music", "Documentary",
         "Religious", "Culture", "Education", "Lifestyle", "Comedy", "Animation", "Family", "Business",

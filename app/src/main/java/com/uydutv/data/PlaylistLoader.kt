@@ -38,6 +38,17 @@ object PlaylistLoader {
         return blockedKeywords.any { text.contains(it) }
     }
 
+    private val parenthesisRegex = Regex("""\([^)]*\)|\[[^\]]*\]|\{[^}]*\}""")
+
+    /**
+     * Kanal isimlerindeki parantez ve köşeli parantez içindeki açıklamaları temizler.
+     * Sadece net kanal ismini bırakır (Örn: "Kanal D (Canlı)" -> "Kanal D", "TRT 1 (1080p)" -> "TRT 1").
+     */
+    fun cleanChannelName(raw: String): String {
+        val stripped = raw.replace(parenthesisRegex, " ").replace(Regex("""\s+"""), " ").trim()
+        return stripped.ifEmpty { raw.trim() }
+    }
+
     /**
      * M3U metnini ayrıştırır.
      * UTF-8 Türkçe karakterleri, tvg-id, tvg-name, tvg-logo, group-title ve #EXTGRP etiketlerini destekler.
@@ -75,9 +86,10 @@ object PlaylistLoader {
 
                     val commaIndex = line.lastIndexOf(',')
                     val titleAfterComma = if (commaIndex >= 0) line.substring(commaIndex + 1).trim() else ""
-                    name = titleAfterComma.ifBlank {
+                    val rawTitle = titleAfterComma.ifBlank {
                         attrs["tvg-name"]?.trim() ?: attrs["tvg-id"]?.trim() ?: ""
                     }
+                    name = cleanChannelName(rawTitle)
                 }
                 line.startsWith("#EXTGRP:", ignoreCase = true) -> {
                     val grp = line.substringAfter(":").trim()
@@ -188,7 +200,8 @@ object PlaylistLoader {
             result.add(mergedChannel)
         }
 
-        return ChannelOrder.apply(result)
+        val ordered = ChannelOrder.apply(result)
+        return if (ctx != null) ChannelCustomizationManager.applyCustomizations(ctx, ordered) else ordered
     }
 
     /**
@@ -225,11 +238,14 @@ object PlaylistLoader {
 
                     val latency = if (obj.has("latency")) obj.getLong("latency") else null
 
+                    val rawName = obj.getString("name")
+                    val cleanedName = cleanChannelName(rawName)
+
                     channels.add(
                         TvChannel(
                             number = obj.getInt("number"),
                             id = obj.getString("id"),
-                            name = obj.getString("name"),
+                            name = cleanedName,
                             logoUrl = obj.optString("logoUrl").takeIf { it.isNotBlank() },
                             streamUrl = streamUrls.firstOrNull() ?: streamUrl,
                             streamUrls = streamUrls,
@@ -245,7 +261,7 @@ object PlaylistLoader {
                     )
                 }
                 if (channels.isNotEmpty()) {
-                    return channels
+                    return ChannelCustomizationManager.applyCustomizations(ctx, channels)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "JSON önbellek okunamadı: ${e.message}")
@@ -259,7 +275,8 @@ object PlaylistLoader {
             }
             if (f.exists() && f.length() > 0) {
                 val content = f.readText(StandardCharsets.UTF_8)
-                parse(content).takeIf { it.isNotEmpty() }
+                val parsed = parse(content).takeIf { it.isNotEmpty() }
+                if (parsed != null) ChannelCustomizationManager.applyCustomizations(ctx, parsed) else null
             } else null
         } catch (e: Exception) {
             Log.w(TAG, "M3U önbellek okunamadı: ${e.message}")
