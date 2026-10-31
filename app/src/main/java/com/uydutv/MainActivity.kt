@@ -102,6 +102,15 @@ class MainActivity : Activity() {
     private var streamAttemptIndex = 0
     private var streamStartTime = 0L
     private var activePlayingStream: String? = null
+    private var currentResolution: String = "720p HD"
+
+    private fun saveLastChannel(channel: TvChannel) {
+        getSharedPreferences("uydutv", MODE_PRIVATE).edit()
+            .putInt("last_channel", channel.number)
+            .putString("last_channel_id", channel.id)
+            .putString("last_channel_name", channel.name)
+            .apply()
+    }
 
     private val handler = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
@@ -192,15 +201,23 @@ class MainActivity : Activity() {
             ChannelCatalog.setAll(ChannelCatalog.builtIn)
         }
 
-        // Son izlenen kanalı aç; yoksa ilk kanaldan başla
-        val saved = getSharedPreferences("uydutv", MODE_PRIVATE).getInt("last_channel", 1)
-        val idx = ChannelCatalog.channels.indexOfFirst { it.number == saved }
+        // Açılışta son izlenen kanaldan devam etme
+        val prefs = getSharedPreferences("uydutv", MODE_PRIVATE)
+        val savedNumber = prefs.getInt("last_channel", 1)
+        val savedId = prefs.getString("last_channel_id", null)
+        val savedName = prefs.getString("last_channel_name", null)
+
+        val channelList = ChannelCatalog.channels
+        val idx = channelList.indexOfFirst {
+            (savedId != null && it.id == savedId) ||
+            it.number == savedNumber ||
+            (savedName != null && it.name.equals(savedName, ignoreCase = true))
+        }
         channelIndex = if (idx >= 0) idx else 0
 
         playCurrentChannel()
 
         // 2. 6 saat kuralı: Yalnızca önbellek yoksa veya son güncellemeden 6 saat geçmişse indir
-        val prefs = getSharedPreferences("uydutv", MODE_PRIVATE)
         val lastUpdate = prefs.getLong("last_playlist_update_time", 0L)
         val now = System.currentTimeMillis()
         val SIX_HOURS_MS = 6 * 60 * 60 * 1000L
@@ -281,17 +298,40 @@ class MainActivity : Activity() {
                     showLoadingLogo()
                 }
             }
+
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                if (videoSize.height > 0) {
+                    val label = when {
+                        videoSize.height >= 2160 -> "4K"
+                        videoSize.height >= 1440 -> "2K"
+                        videoSize.height >= 1080 -> "1080p"
+                        videoSize.height >= 720 -> "720p HD"
+                        videoSize.height >= 576 -> "576p SD"
+                        videoSize.height >= 480 -> "480p SD"
+                        else -> "${videoSize.height}p"
+                    }
+                    currentResolution = label
+                    if (overlayVisible) {
+                        showChannelInfo()
+                    }
+                }
+            }
         })
         player = exo
     }
 
     /**
      * AndroidX Media3 ExoPlayer yapılandırması:
-     * HLS ve DASH akışları için hızlı başlangıç ve uyumlu tampon ayarları.
+     * Tüm yayınlar en üst sınır 720p (1280x720) olacak şekilde ayarlanır.
+     * Yayında 720p yoksa o yayındaki en yüksek çözünürlük seçilir.
      */
     private fun buildPlayer(): ExoPlayer {
         val selector = DefaultTrackSelector(this).also {
-            it.setParameters(it.buildUponParameters().setForceHighestSupportedBitrate(true))
+            it.setParameters(
+                it.buildUponParameters()
+                    .setMaxVideoSize(1280, 720)
+                    .setExceedVideoConstraintsIfNecessary(true)
+            )
         }
         val meter = DefaultBandwidthMeter.Builder(this).setInitialBitrateEstimate(30_000_000L).build()
         val load = DefaultLoadControl.Builder()
@@ -386,6 +426,7 @@ class MainActivity : Activity() {
 
                     val currentName = currentChannel.name
                     val currentId = currentChannel.id
+                    val currentNumber = currentChannel.number
                     val hadStream = ChannelCatalog.playableStream(currentChannel) != null
 
                     ChannelCatalog.setAll(fresh)
@@ -393,7 +434,7 @@ class MainActivity : Activity() {
 
                     // O anda izlenen kanalı yeni listede bul ve koru
                     val idx = list.indexOfFirst {
-                        it.id == currentId || it.name.equals(currentName, ignoreCase = true)
+                        it.id == currentId || it.number == currentNumber || it.name.equals(currentName, ignoreCase = true)
                     }
 
                     if (idx >= 0) {
@@ -430,13 +471,7 @@ class MainActivity : Activity() {
             setBackgroundColor(colorBgDark)
             isFocusableInTouchMode = true
             setOnClickListener {
-                if (guideVisible) {
-                    closeGuide(commit = false)
-                } else {
-                    val now = SystemClock.uptimeMillis()
-                    if (now - lastOkAt < 2000) openGuide() else showChannelInfo()
-                    lastOkAt = now
-                }
+                if (guideVisible) closeGuide(commit = false) else openGuide()
             }
         }
         playerView = PlayerView(this).apply {
@@ -445,13 +480,7 @@ class MainActivity : Activity() {
             setShutterBackgroundColor(colorBgDark)
             layoutParams = FrameLayout.LayoutParams(-1, -1)
             setOnClickListener {
-                if (guideVisible) {
-                    closeGuide(commit = true)
-                } else {
-                    val now = SystemClock.uptimeMillis()
-                    if (now - lastOkAt < 2000) openGuide() else showChannelInfo()
-                    lastOkAt = now
-                }
+                if (guideVisible) closeGuide(commit = true) else openGuide()
             }
         }
         root.addView(playerView)
@@ -619,7 +648,7 @@ class MainActivity : Activity() {
 
         val channel = currentChannel
         loadedId = channel.id
-        getSharedPreferences("uydutv", MODE_PRIVATE).edit().putInt("last_channel", channel.number).apply()
+        saveLastChannel(channel)
 
         val streams = if (channel.streamUrls.isNotEmpty()) channel.streamUrls else listOfNotNull(channel.streamUrl)
 
@@ -698,17 +727,18 @@ class MainActivity : Activity() {
         val streams = if (c.streamUrls.isNotEmpty()) c.streamUrls else listOfNotNull(c.streamUrl)
         val totalStreams = streams.size
         val streamStr = if (totalStreams > 1) "   [Kaynak ${streamAttemptIndex + 1}/$totalStreams · ◂ ▸ Değiştir]" else ""
+        val resBadge = if (currentResolution.isNotBlank()) "   [$currentResolution]" else ""
 
-        infoTitle.text = String.format(Locale.getDefault(), "%03d   %s%s", c.number, c.name, streamStr)
+        infoTitle.text = String.format(Locale.getDefault(), "%03d   %s%s%s", c.number, c.name, streamStr, resBadge)
         val now = System.currentTimeMillis()
         val cur = findProgram(c, now)
         val next = findNextProgram(c, now)
         infoSubtitle.text = if (cur != null) {
             val timeFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
             val curTime = "${timeFmt.format(Date(cur.start))} - ${timeFmt.format(Date(cur.end))}"
-            "● CANLI   ${cur.title} ($curTime)   ·   Sonraki: ${next?.title ?: "—"}"
+            "● CANLI   ${cur.title} ($curTime)   ·   Sonraki: ${next?.title ?: "—"}   ·   [OK: Kanal Listesi]"
         } else {
-            "● CANLI YAYIN   ·   Program rehberi bilgisi aranıyor"
+            "● CANLI YAYIN   ·   Program rehberi bilgisi aranıyor   ·   [OK: Kanal Listesi]"
         }
         infoPanel.visibility = View.VISIBLE
         overlayVisible = true
@@ -803,7 +833,7 @@ class MainActivity : Activity() {
         guideVisible = true; overlayVisible = true
         applyLayout(true)
         guideRows.removeAllViews()
-        guideTitle.text = "◂  ${ChannelCatalog.categoryLabel(ChannelCatalog.category)}  ▸   (${ChannelCatalog.channels.size})"
+        guideTitle.text = "KANAL LİSTESİ · ◂ ${ChannelCatalog.categoryLabel(ChannelCatalog.category)} ▸ (${ChannelCatalog.channels.size})"
         val now = System.currentTimeMillis()
         ChannelCatalog.channels.forEachIndexed { index, c ->
             val selected = index == channelIndex
@@ -1090,16 +1120,16 @@ class MainActivity : Activity() {
             KeyEvent.KEYCODE_DPAD_RIGHT -> { switchStreamSource(1); return true }
             KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_DPAD_DOWN -> { changeChannel(1); return true }
             KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_DPAD_UP -> { changeChannel(-1); return true }
-            KeyEvent.KEYCODE_GUIDE, KeyEvent.KEYCODE_G -> { openGuide(); return true }
+            KeyEvent.KEYCODE_GUIDE, KeyEvent.KEYCODE_G, KeyEvent.KEYCODE_MENU,
+            KeyEvent.KEYCODE_TV_CONTENTS_MENU, KeyEvent.KEYCODE_PROG_RED,
+            KeyEvent.KEYCODE_BUTTON_SELECT, KeyEvent.KEYCODE_L -> { openGuide(); return true }
             KeyEvent.KEYCODE_INFO, KeyEvent.KEYCODE_I -> { showChannelInfo(); return true }
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
                 if (statusText.visibility == View.VISIBLE && !currentChannel.officialLivePage.isNullOrBlank()) {
                     openOfficialWebPage(currentChannel.officialLivePage)
                     return true
                 }
-                val now = SystemClock.uptimeMillis()
-                if (now - lastOkAt < 2000) openGuide() else showChannelInfo()
-                lastOkAt = now
+                openGuide()
                 return true
             }
             KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE -> {
@@ -1135,7 +1165,11 @@ class MainActivity : Activity() {
         }
     }
 
-    override fun onStop() { super.onStop(); player?.pause() }
+    override fun onStop() {
+        super.onStop()
+        saveLastChannel(currentChannel)
+        player?.pause()
+    }
     override fun onStart() { super.onStart(); if (player != null && ChannelCatalog.playableStream(currentChannel) != null) player?.play() }
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)

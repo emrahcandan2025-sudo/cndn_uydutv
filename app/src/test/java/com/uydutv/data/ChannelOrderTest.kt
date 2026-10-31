@@ -47,4 +47,17 @@ class ChannelOrderTest {
         assertEquals(null, ChannelCatalog.playableStream(invalidM3u))
         assertEquals(null, ChannelCatalog.playableStream(unverified))
     }
+
+    @Test
+    fun testEuroStarAndStarTvMapping() {
+        assertEquals("eurostar", ChannelOrder.normalize("Euro Star"))
+        assertEquals("startv", ChannelOrder.normalize("Star TV HD"))
+        val input = listOf(
+            TvChannel(99, "ch_star", "Star TV HD", streamUrl = "https://example.com/star.m3u8"),
+            TvChannel(99, "ch_eurostar", "Euro Star", streamUrl = "https://example.com/eurostar.m3u8")
+        )
+        val ordered = ChannelOrder.apply(input)
+        assertEquals(4, ordered.first { it.id == "ch_star" }.number)
+        assertEquals(51, ordered.first { it.id == "ch_eurostar" }.number)
+    }
 }
