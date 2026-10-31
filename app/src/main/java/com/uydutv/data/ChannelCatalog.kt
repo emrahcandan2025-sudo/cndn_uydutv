@@ -49,8 +49,14 @@ data class TvChannel(
 )
 
 object ChannelCatalog {
-    /** Primary M3U playlist source specified for CNDN TV (iptv-org Türkiye). */
-    const val PRIMARY_PLAYLIST_URL: String = "https://iptv-org.github.io/iptv/countries/tr.m3u"
+    /** Ana yayın kaynağı: Göktürk IPTV Türkiye (gokturkiptv.com/kanallar/turkiye). */
+    const val GOKTURK_PLAYLIST_URL: String = "https://gokturkiptv.com/kanallar/turkiye"
+
+    /** iptv-org Türkiye M3U listesi kaynağı. */
+    const val IPTV_ORG_TR_URL: String = "https://iptv-org.github.io/iptv/countries/tr.m3u"
+
+    /** Primary M3U playlist source specified for CNDN TV. */
+    const val PRIMARY_PLAYLIST_URL: String = GOKTURK_PLAYLIST_URL
 
     /** Candidate XMLTV feed. Feed availability does not establish redistribution rights. */
     const val XMLTV_SOURCE_URL: String = "https://iptv-epg.org/files/epg-tr.xml"

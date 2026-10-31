@@ -437,6 +437,101 @@ object PlaylistLoader {
     }
 
     /**
+     * Verilen URL'den (M3U veya Göktürk IPTV gibi web sayfası) kanalları indirir ve ayrıştırır.
+     * Web sayfası ise içerisindeki M3U çalma listesi bağlantısını veya doğrudan yayın etiketlerini bulur.
+     */
+    fun fetchFromUrlOrWebPage(urlStr: String, defaultOrigin: String = "M3U Yayını"): List<TvChannel>? {
+        return try {
+            val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 6000
+                readTimeout = 10000
+                requestMethod = "GET"
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml,text/plain,*/*")
+            }
+            if (conn.responseCode in 200..299) {
+                val content = conn.inputStream.use { input ->
+                    InputStreamReader(input, StandardCharsets.UTF_8).buffered().use { it.readText() }
+                }
+                conn.disconnect()
+
+                if (content.isBlank()) return null
+
+                // 1. Doğrudan M3U formatıysa
+                if (content.contains("#EXTINF") || content.startsWith("#EXTM3U")) {
+                    return parse(content).map {
+                        it.copy(
+                            sourceOrigin = defaultOrigin,
+                            notes = it.notes ?: "$defaultOrigin Türkiye"
+                        )
+                    }
+                }
+
+                // 2. HTML sayfası ise: Sayfa içerisindeki M3U bağlantısını tespit et
+                val m3uLinkRegex = Regex("""href=["'](https?://[^"']+\.m3u8?)["']""", RegexOption.IGNORE_CASE)
+                val m3uMatch = m3uLinkRegex.find(content)
+                if (m3uMatch != null) {
+                    val m3uUrl = m3uMatch.groupValues[1]
+                    Log.i(TAG, "$defaultOrigin sayfasından M3U bağlantısı tespit edildi: $m3uUrl")
+                    val parsed = fetchFromUrlOrWebPage(m3uUrl, defaultOrigin)
+                    if (!parsed.isNullOrEmpty()) {
+                        return parsed.map {
+                            it.copy(
+                                sourceOrigin = defaultOrigin,
+                                notes = "$defaultOrigin / " + (it.notes ?: "Türkiye")
+                            )
+                        }
+                    }
+                }
+
+                // 3. HTML içindeki doğrudan yayın akışlarını regex ile topla
+                val extracted = extractChannelsFromHtml(content, defaultOrigin)
+                if (extracted.isNotEmpty()) {
+                    return extracted
+                }
+            } else {
+                conn.disconnect()
+            }
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Web / M3U ayrıştırma hatası ($urlStr): ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Web sayfasındaki doğrudan video/akış bağlantılarını ayıklar.
+     */
+    fun extractChannelsFromHtml(html: String, defaultOrigin: String = "Göktürk IPTV"): List<TvChannel> {
+        val results = mutableListOf<TvChannel>()
+        val streamRegex = Regex("""(?i)(?:href|data-src|data-url|src)=["'](https?://[^"']+\.m3u8?[^"']*)["'][^>]*>([^<]+)<""")
+        for (match in streamRegex.findAll(html)) {
+            val streamUrl = match.groupValues[1].trim()
+            val name = cleanChannelName(match.groupValues[2].trim())
+            if (name.isNotBlank() && streamUrl.isNotBlank()) {
+                val catalogMatch = ChannelCatalog.findOfficialChannel(name)
+                results.add(
+                    TvChannel(
+                        number = results.size + 1,
+                        id = "ch_${Math.abs(streamUrl.hashCode().toLong())}",
+                        name = name,
+                        streamUrl = streamUrl,
+                        streamUrls = listOf(streamUrl),
+                        officialLivePage = catalogMatch?.officialLivePage,
+                        xmltvId = catalogMatch?.xmltvId,
+                        streamStatus = VerificationStatus.USER_PROVIDED,
+                        notes = "$defaultOrigin Türkiye",
+                        sourceOrigin = defaultOrigin,
+                        groups = catalogMatch?.groups ?: listOf("Ulusal")
+                    )
+                )
+            }
+        }
+        return results
+    }
+
+    /**
      * Belirtilen listeleri ve kullanıcının özel IP listelerini indirir, hepsini birleştirir,
      * çoklu akış adreslerini gruplar ve önbelleğe yazar.
      */
@@ -452,6 +547,28 @@ object PlaylistLoader {
             }
         } catch (e: Exception) {
             Log.w(TAG, "Kullanıcı özel listesi okunamadı: ${e.message}")
+        }
+
+        // 2. ANA YAYIN: Göktürk IPTV Türkiye Kanal Listesi (gokturkiptv.com/kanallar/turkiye)
+        try {
+            val gokturkChannels = fetchFromUrlOrWebPage(ChannelCatalog.GOKTURK_PLAYLIST_URL, "Göktürk IPTV")
+            if (!gokturkChannels.isNullOrEmpty()) {
+                downloadedLists.add(gokturkChannels)
+                Log.i(TAG, "Göktürk IPTV ana yayını başarıyla yüklendi: ${gokturkChannels.size} kanal")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Göktürk IPTV ana yayını yüklenirken hata: ${e.message}")
+        }
+
+        // 3. DOĞRUDAN TÜRKİYE M3U: iptv-org Türkiye (https://iptv-org.github.io/iptv/countries/tr.m3u)
+        try {
+            val iptvOrgChannels = fetchFromUrlOrWebPage(ChannelCatalog.IPTV_ORG_TR_URL, "iptv-org (TR)")
+            if (!iptvOrgChannels.isNullOrEmpty()) {
+                downloadedLists.add(iptvOrgChannels)
+                Log.i(TAG, "iptv-org Türkiye M3U yayını başarıyla yüklendi: ${iptvOrgChannels.size} kanal")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "iptv-org Türkiye yayını yüklenirken hata: ${e.message}")
         }
 
         for (urlStr in ChannelCatalog.PLAYLIST_URLS) {

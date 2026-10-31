@@ -231,4 +231,29 @@ class PlaylistLoaderTest {
         assertFalse(StreamHealthManager.isIpStream(domainStream))
         assertEquals(ipStream, trt1?.streamUrls?.firstOrNull())
     }
+
+    @Test
+    fun testGokturkIptvConfigurationAndHtmlExtraction() {
+        assertEquals("https://gokturkiptv.com/kanallar/turkiye", ChannelCatalog.GOKTURK_PLAYLIST_URL)
+        assertEquals(ChannelCatalog.GOKTURK_PLAYLIST_URL, ChannelCatalog.PRIMARY_PLAYLIST_URL)
+
+        val sampleHtml = """
+            <html>
+                <body>
+                    <a href="https://gokturkiptv.com/stream/trt1.m3u8">TRT 1 HD</a>
+                    <a href="https://gokturkiptv.com/stream/atv.m3u8">ATV</a>
+                </body>
+            </html>
+        """.trimIndent()
+        val channels = PlaylistLoader.extractChannelsFromHtml(sampleHtml)
+        assertEquals(2, channels.size)
+        assertEquals("TRT 1 HD", channels[0].name)
+        assertEquals("https://gokturkiptv.com/stream/trt1.m3u8", channels[0].streamUrl)
+        assertEquals("Göktürk IPTV", channels[0].sourceOrigin)
+    }
+
+    @Test
+    fun testIptvOrgTrConfiguration() {
+        assertEquals("https://iptv-org.github.io/iptv/countries/tr.m3u", ChannelCatalog.IPTV_ORG_TR_URL)
+    }
 }

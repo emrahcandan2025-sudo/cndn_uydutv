@@ -262,11 +262,13 @@ class MainActivity : Activity() {
 
         playCurrentChannel()
 
-        // 2. 6 saat kuralı: Yalnızca önbellek yoksa veya son güncellemeden 6 saat geçmişse indir
+        // 2. 6 saat kuralı: Göktürk IPTV veya iptv-org Türkiye yayını henüz önbellekte yoksa veya 6 saat geçmişse indir
         val lastUpdate = prefs.getLong("last_playlist_update_time", 0L)
         val now = System.currentTimeMillis()
         val SIX_HOURS_MS = 6 * 60 * 60 * 1000L
-        val shouldRefresh = (cached == null || cached.isEmpty() || (now - lastUpdate) > SIX_HOURS_MS)
+        val hasGokturk = cached?.any { it.sourceOrigin?.contains("Göktürk", ignoreCase = true) == true } == true
+        val hasIptvOrg = cached?.any { it.sourceOrigin?.contains("iptv-org", ignoreCase = true) == true } == true
+        val shouldRefresh = (cached == null || cached.isEmpty() || !hasGokturk || !hasIptvOrg || (now - lastUpdate) > SIX_HOURS_MS)
 
         if (shouldRefresh) {
             refreshPlaylist()
@@ -1036,7 +1038,11 @@ class MainActivity : Activity() {
 
         if (totalStreams > 1) {
             badgeSource.visibility = View.VISIBLE
-            badgeSource.text = "Kaynak ${streamAttemptIndex + 1}/$totalStreams · ◂ ▸"
+            val origin = c.sourceOrigin?.takeIf { it.isNotBlank() }
+            badgeSource.text = if (origin != null) "$origin · Kaynak ${streamAttemptIndex + 1}/$totalStreams · ◂ ▸" else "Kaynak ${streamAttemptIndex + 1}/$totalStreams · ◂ ▸"
+        } else if (!c.sourceOrigin.isNullOrBlank()) {
+            badgeSource.visibility = View.VISIBLE
+            badgeSource.text = c.sourceOrigin
         } else {
             badgeSource.visibility = View.GONE
         }
