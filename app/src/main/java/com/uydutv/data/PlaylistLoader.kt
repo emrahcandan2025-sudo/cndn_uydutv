@@ -144,9 +144,41 @@ object PlaylistLoader {
         return ChannelOrder.apply(out)
     }
 
+    @Volatile
+    private var cachedDogusToken: String = "de13baf2a095e421aad499fa34d560d9205ec5b4b28a3371"
+    private var lastTokenFetchTime: Long = 0L
+
     /**
-     * Farklı kaynaklardan indirilen kanal listelerini birleştirir.
-     * Aynı kanalın (ad/slot eşleşmesi) birden fazla akış adresi varsa hepsini bir araya toplar.
+     * Doğuş Yayın Grubu (Star TV, Euro Star, NTV) için geçerli canlı yayın yetkilendirme belirtecini alır.
+     */
+    fun getDogusToken(): String {
+        val now = System.currentTimeMillis()
+        if (now - lastTokenFetchTime > 12 * 60 * 60 * 1000L) {
+            try {
+                val conn = (URL("https://www.eurostartv.com.tr/canli-izle").openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 6000
+                    readTimeout = 8000
+                    setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                }
+                if (conn.responseCode in 200..299) {
+                    val html = conn.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+                    val match = Regex("""token=([a-f0-9]{30,})""").find(html)
+                    if (match != null) {
+                        cachedDogusToken = match.groupValues[1]
+                        lastTokenFetchTime = now
+                    }
+                }
+                conn.disconnect()
+            } catch (e: Exception) {
+                Log.w(TAG, "Doğuş token yenilenemedi, önbellekteki token kullanılıyor: ${e.message}")
+            }
+        }
+        return cachedDogusToken
+    }
+
+    /**
+     * Birden fazla M3U listesini birleştirir.
+     * Aynı kanalların akışlarını tek bir TvChannel altında streamUrls listesinde toplar.
      * Hızlı açılan akışları öne alacak şekilde sıralar.
      */
     fun mergeChannelLists(lists: List<List<TvChannel>>, ctx: Context? = null): List<TvChannel> {
@@ -165,7 +197,7 @@ object PlaylistLoader {
         }
 
         val result = mutableListOf<TvChannel>()
-        for ((_, groupChannels) in grouped) {
+        for ((key, groupChannels) in grouped) {
             val primary = groupChannels.first()
 
             // Tüm aday akış adreslerini birleştir
@@ -177,6 +209,27 @@ object PlaylistLoader {
                     if (seen.add(st)) {
                         allStreams.add(st)
                     }
+                }
+            }
+
+            // Star TV (slot_4) için bölgesel kısıtlamasız (Avrupa / Doğuş MNCDN) akışları önceliklendir
+            if (key == "slot_4" || primary.id == "startv" || primary.name.contains("Star", ignoreCase = true)) {
+                val token = getDogusToken()
+                val dogusFeeds = listOf(
+                    "https://dygvideo.dygdigital.com/live/hls/staravrupa?token=$token",
+                    "https://dygvideo.dygdigital.com/live/hls/startv?token=$token",
+                    "https://dogus.daioncdn.net/startv/startv.m3u8?app=startv_web"
+                )
+                // Kısıtlamasız akışları listenin başına al
+                for (feed in dogusFeeds.reversed()) {
+                    allStreams.remove(feed)
+                    allStreams.add(0, feed)
+                }
+                // Bölgesel yayın hakkı kısıtlaması (ce=3) içeren akışı en sona taşı
+                val restrictedStreams = allStreams.filter { it.contains("ce=3") }
+                if (restrictedStreams.isNotEmpty()) {
+                    allStreams.removeAll(restrictedStreams)
+                    allStreams.addAll(restrictedStreams)
                 }
             }
 
@@ -249,6 +302,26 @@ object PlaylistLoader {
                     val streamUrl = obj.optString("streamUrl").takeIf { it.isNotBlank() }
                     if (streamUrl != null && !streamUrls.contains(streamUrl)) {
                         streamUrls.add(0, streamUrl)
+                    }
+
+                    val chNum = obj.optInt("number", 0)
+                    val chId = obj.optString("id", "")
+                    if (chNum == 4 || chId == "startv" || obj.optString("name").contains("Star", ignoreCase = true)) {
+                        val token = getDogusToken()
+                        val dogusFeeds = listOf(
+                            "https://dygvideo.dygdigital.com/live/hls/staravrupa?token=$token",
+                            "https://dygvideo.dygdigital.com/live/hls/startv?token=$token",
+                            "https://dogus.daioncdn.net/startv/startv.m3u8?app=startv_web"
+                        )
+                        for (f in dogusFeeds.reversed()) {
+                            streamUrls.remove(f)
+                            streamUrls.add(0, f)
+                        }
+                        val restricted = streamUrls.filter { it.contains("ce=3") }
+                        if (restricted.isNotEmpty()) {
+                            streamUrls.removeAll(restricted)
+                            streamUrls.addAll(restricted)
+                        }
                     }
 
                     val latency = if (obj.has("latency")) obj.getLong("latency") else null

@@ -24,7 +24,7 @@ object ChannelOrder {
         Slot(1, "TRT 1"),
         Slot(2, "ATV"),
         Slot(3, "Kanal D"),
-        Slot(4, "Star TV", listOf("Star")),
+        Slot(4, "Star TV", listOf("Star", "Star TV HD", "Star HD")),
         Slot(5, "Show TV", listOf("Show")),
         Slot(6, "Beyaz TV", listOf("Beyaz")),
         Slot(7, "Kanal 7"),
@@ -70,7 +70,8 @@ object ChannelOrder {
         Slot(47, "Kon TV", listOf("Kontv")),
         Slot(48, "Olay TV"),
         Slot(49, "Aksu TV"),
-        Slot(50, "Kanal Fırat", listOf("Kanal Firat"))
+        Slot(50, "Kanal Fırat", listOf("Kanal Firat")),
+        Slot(51, "Euro Star", listOf("Eurostar", "Star Avrupa", "Star TV Avrupa"))
     )
 
     /** Türkçe harfleri sadeleştirir; boşluk, noktalama, (parantez) ve HD/FHD ekini atar. */

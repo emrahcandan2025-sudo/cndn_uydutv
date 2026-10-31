@@ -10,27 +10,27 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.PathMeasure
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.view.View
-import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import com.uydutv.R
 
 /**
- * CNDN TV Sinematik Açılış Animasyonu
+ * CNDN TV Modern Stüdyo Açılış Ekranı (Studio Intro).
  *
- * 7 aşamalı akış:
- * 1. Koyu lacivert/siyah arka plan (#060813).
- * 2. Merkezde yumuşak ışık parıltısı.
- * 3. Turuncu ve mavi kıvrımlı ışık izlerinin televizyon çerçevesini çizmesi.
- * 4. Antenlerin zarif ışık efektleriyle yükselmesi.
- * 5. Merkezdeki turuncu-sarı oynat simgesinin parlaması.
- * 6. "CNDN TV" tipografisinin ışık geçişiyle aydınlanması.
- * 7. Logonun kısa süre sabit kalması ve canlı TV ekranına yumuşak geçiş.
+ * Akıcı, sade ve profesyonel tasarım:
+ * 1. Derin sinematik gece mavisi arka plan (#070C18 -> #03050B)
+ * 2. Merkeze yayılan yumuşak neon ambiyans ışıltısı (Cyan & Amber)
+ * 3. Yüksek çözünürlüklü 3D CNDN TV logosunun sinematik yakınlaşma ve parıltı efektiyle belirmesi
+ * 4. Logonun altında zarif stüdyo yansıması (floor reflection)
+ * 5. Minimalist "CANLI TELEVİZYON YAYIN PLATFORMU" tipografisi
+ * 6. İnce, zarif neon yükleme çizgisi
+ * 7. Canlı TV akışına pürüzsüz geçiş (2 saniye)
  */
 class CinematicSplashView(
     context: Context,
@@ -42,7 +42,6 @@ class CinematicSplashView(
     private var isCompleted = false
 
     private val bgPaint = Paint().apply {
-        color = Color.parseColor("#101A30")
         style = Paint.Style.FILL
     }
 
@@ -50,46 +49,42 @@ class CinematicSplashView(
         style = Paint.Style.FILL
     }
 
-    private val ribbonPaintOrange = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
+    private val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        isFilterBitmap = true
     }
 
-    private val ribbonPaintBlue = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
+    private val reflectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        isFilterBitmap = true
     }
 
-    private val antennaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
+    private val shimmerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)
     }
 
-    private val antennaTipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#A8B8D0")
+        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        textAlign = Paint.Align.CENTER
+        letterSpacing = 0.24f
+    }
+
+    private val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#28D9C5")
+        typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+        letterSpacing = 0.12f
+    }
+
+    private val barBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.argb(45, 255, 255, 255)
+    }
+
+    private val barProgressPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
     }
 
-    private val playPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-    }
-
-    private val textPaintWhite = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
-        textAlign = Paint.Align.RIGHT
-    }
-
-    private val textPaintOrange = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
-        textAlign = Paint.Align.LEFT
-    }
-
-    private val logoBitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-    private val tvFramePath = Path()
-    private val tvMeasure = PathMeasure()
     private var logoBitmap: Bitmap? = null
 
     init {
@@ -101,18 +96,19 @@ class CinematicSplashView(
 
     private fun loadLogoBitmap() {
         try {
-            val resId = R.drawable.cndn_logo
-            val opts = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
-            logoBitmap = BitmapFactory.decodeResource(resources, resId, opts)
+            val opts = BitmapFactory.Options().apply {
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            logoBitmap = BitmapFactory.decodeResource(resources, R.drawable.cndn_logo, opts)
         } catch (_: Exception) {
-            // Bitmap yüklenemezse tam vektörel çizim çalışır
+            // Hata durumunda güvenli boş kalır
         }
     }
 
     private fun startAnimation() {
         animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 3600L
-            interpolator = AccelerateDecelerateInterpolator()
+            duration = 2100L
+            interpolator = DecelerateInterpolator(1.4f)
             addUpdateListener { va ->
                 progress = va.animatedValue as Float
                 invalidate()
@@ -136,9 +132,15 @@ class CinematicSplashView(
     private fun finishOnce() {
         if (!isCompleted) {
             isCompleted = true
-            animate().alpha(0f).setDuration(350).withEndAction {
-                onFinished()
-            }.start()
+            animate()
+                .alpha(0f)
+                .scaleX(1.03f)
+                .scaleY(1.03f)
+                .setDuration(260)
+                .withEndAction {
+                    onFinished()
+                }
+                .start()
         }
     }
 
@@ -155,151 +157,118 @@ class CinematicSplashView(
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        // 1. Koyu arka plan
+        val cx = w / 2f
+        val cy = h / 2f - (h * 0.05f)
+        val scale = Math.min(w / 800f, h / 500f).coerceIn(0.7f, 1.4f)
+
+        // 1. Derin sinematik arka plan gradyanı
+        bgPaint.shader = RadialGradient(
+            cx, cy, Math.max(w, h) * 0.85f,
+            intArrayOf(
+                Color.parseColor("#0F1A30"), // Merkez koyu lacivert
+                Color.parseColor("#091022"),
+                Color.parseColor("#040710")  // Kenarlar sinematik siyah
+            ),
+            floatArrayOf(0f, 0.55f, 1.0f),
+            Shader.TileMode.CLAMP
+        )
         canvas.drawRect(0f, 0f, w, h, bgPaint)
 
-        val cx = w / 2f
-        val cy = h / 2f - (h * 0.04f)
-        val scale = Math.min(w, h) / 600f
-
-        // AŞAMA 1: Merkezde yumuşak ışık parıltısı (0.00..0.35)
-        if (progress > 0.02f) {
-            val glowAlpha = when {
-                progress < 0.25f -> ((progress - 0.02f) / 0.23f)
-                progress < 0.85f -> 1.0f
-                else -> (1.0f - (progress - 0.85f) / 0.15f)
-            }
-            val glowRadius = (160f * scale) * (0.6f + progress * 0.4f)
-            glowPaint.shader = RadialGradient(
-                cx, cy, glowRadius,
-                intArrayOf(
-                    Color.argb((90 * glowAlpha).toInt(), 41, 156, 255), // Elektrik mavisi #299CFF
-                    Color.argb((60 * glowAlpha).toInt(), 40, 217, 197), // Turkuaz #28D9C5
-                    Color.argb((35 * glowAlpha).toInt(), 155, 112, 245), // Mor #9B70F5
-                    Color.TRANSPARENT
-                ),
-                floatArrayOf(0.0f, 0.4f, 0.75f, 1.0f),
-                Shader.TileMode.CLAMP
-            )
-            canvas.drawCircle(cx, cy, glowRadius, glowPaint)
+        // 2. Yumuşak neon ambiyans ışıltısı (Pulsing Ambient Glow)
+        val glowAlpha = when {
+            progress < 0.20f -> (progress / 0.20f)
+            progress < 0.80f -> 1.0f
+            else -> (1.0f - (progress - 0.80f) / 0.20f)
         }
+        val glowRadius = 240f * scale * (0.85f + progress * 0.15f)
+        glowPaint.shader = RadialGradient(
+            cx, cy - 10f * scale, glowRadius,
+            intArrayOf(
+                Color.argb((70 * glowAlpha).toInt(), 40, 217, 197),  // Turkuaz parıltı #28D9C5
+                Color.argb((45 * glowAlpha).toInt(), 41, 156, 255),  // Elektrik mavisi #299CFF
+                Color.argb((20 * glowAlpha).toInt(), 255, 140, 0),   // İnce sıcak turuncu
+                Color.TRANSPARENT
+            ),
+            floatArrayOf(0f, 0.40f, 0.75f, 1.0f),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawCircle(cx, cy - 10f * scale, glowRadius, glowPaint)
 
-        val tvWidth = 260f * scale
-        val tvHeight = 190f * scale
-        val strokeW = 18f * scale
+        // 3. 3D Logo Çizimi
+        val b = logoBitmap
+        if (b != null && !b.isRecycled) {
+            // Sinematik giriş eğrisi (Zoom: 0.90 -> 1.00, Alpha: 0 -> 1.0)
+            val logoAlpha = (progress / 0.28f).coerceIn(0f, 1f)
+            val zoomFactor = 0.90f + (0.10f * (progress.coerceAtMost(0.85f) / 0.85f))
+            val baseSize = 250f * scale * zoomFactor
 
-        // AŞAMA 2: Çerçevenin ışık izleriyle çizilmesi (0.10..0.65)
-        val frameProgress = ((progress - 0.10f) / 0.50f).coerceIn(0f, 1f)
-        if (frameProgress > 0f) {
-            val rect = RectF(cx - tvWidth / 2f, cy - tvHeight / 2f, cx + tvWidth / 2f, cy + tvHeight / 2f)
-            tvFramePath.reset()
-            tvFramePath.addRoundRect(rect, 48f * scale, 48f * scale, Path.Direction.CW)
-            tvMeasure.setPath(tvFramePath, false)
-            val totalLength = tvMeasure.length
+            val left = cx - baseSize / 2f
+            val top = cy - baseSize / 2f
+            val right = cx + baseSize / 2f
+            val bottom = cy + baseSize / 2f
+            val dstRect = RectF(left, top, right, bottom)
 
-            val currentLength = totalLength * frameProgress
-            val partialPath = Path()
-            tvMeasure.getSegment(0f, currentLength, partialPath, true)
+            logoPaint.alpha = (255 * logoAlpha).toInt()
+            canvas.drawBitmap(b, null, dstRect, logoPaint)
 
-            // Elektrik mavisi ve turkuaz çift gradyan şeritler
-            ribbonPaintOrange.strokeWidth = strokeW
-            ribbonPaintOrange.shader = LinearGradient(
-                rect.left, rect.top, rect.right, rect.top,
-                Color.parseColor("#299CFF"), Color.parseColor("#28D9C5"),
-                Shader.TileMode.CLAMP
-            )
-            canvas.drawPath(partialPath, ribbonPaintOrange)
-
-            // Alt kıvrımda turkuaz / mor ışıltı
-            ribbonPaintBlue.strokeWidth = strokeW * 0.9f
-            ribbonPaintBlue.shader = LinearGradient(
-                rect.left, rect.bottom, rect.right, rect.bottom,
-                Color.parseColor("#28D9C5"), Color.parseColor("#9B70F5"),
-                Shader.TileMode.CLAMP
-            )
-            val blueSegment = Path()
-            val blueStart = (totalLength * 0.45f).coerceAtMost(currentLength)
-            if (currentLength > blueStart) {
-                tvMeasure.getSegment(blueStart, currentLength, blueSegment, true)
-                canvas.drawPath(blueSegment, ribbonPaintBlue)
-            }
-        }
-
-        // AŞAMA 3: Antenlerin belirmesi (0.35..0.70)
-        val antennaProgress = ((progress - 0.35f) / 0.30f).coerceIn(0f, 1f)
-        if (antennaProgress > 0f) {
-            val antY = cy - tvHeight / 2f
-            val antLen = 58f * scale * antennaProgress
-            antennaPaint.strokeWidth = 6f * scale
-
-            // Sol anten (Turkuaz)
-            antennaPaint.color = Color.parseColor("#28D9C5")
-            val leftEndX = cx - 18f * scale - (antLen * 0.65f)
-            val leftEndY = antY - (antLen * 0.75f)
-            canvas.drawLine(cx - 18f * scale, antY, leftEndX, leftEndY, antennaPaint)
-
-            // Sağ anten (Elektrik mavisi)
-            antennaPaint.color = Color.parseColor("#299CFF")
-            val rightEndX = cx + 18f * scale + (antLen * 0.65f)
-            val rightEndY = antY - (antLen * 0.75f)
-            canvas.drawLine(cx + 18f * scale, antY, rightEndX, rightEndY, antennaPaint)
-
-            // Parlayan anten uçları
-            if (antennaProgress > 0.5f) {
-                val tipAlpha = ((antennaProgress - 0.5f) / 0.5f).coerceIn(0f, 1f)
-                val tipRadius = 9f * scale * tipAlpha
-                antennaTipPaint.color = Color.argb((255 * tipAlpha).toInt(), 40, 217, 197)
-                canvas.drawCircle(leftEndX, leftEndY, tipRadius, antennaTipPaint)
-                antennaTipPaint.color = Color.argb((255 * tipAlpha).toInt(), 41, 156, 255)
-                canvas.drawCircle(rightEndX, rightEndY, tipRadius, antennaTipPaint)
-            }
-        }
-
-        // AŞAMA 4: Merkezdeki parlayan oynat simgesi (0.45..0.75)
-        val playProgress = ((progress - 0.45f) / 0.25f).coerceIn(0f, 1f)
-        if (playProgress > 0f) {
-            val playScale = (0.3f + 0.7f * playProgress) * (if (playProgress < 0.9f) 1.05f else 1.0f)
-            val pSize = 42f * scale * playScale
-            val playPath = Path().apply {
-                moveTo(cx - pSize * 0.6f, cy - pSize)
-                lineTo(cx + pSize, cy)
-                lineTo(cx - pSize * 0.6f, cy + pSize)
-                close()
-            }
-            playPaint.shader = LinearGradient(
-                cx - pSize, cy - pSize, cx + pSize, cy + pSize,
-                Color.parseColor("#28D9C5"), Color.parseColor("#299CFF"),
-                Shader.TileMode.CLAMP
-            )
-            canvas.drawPath(playPath, playPaint)
-        }
-
-        // AŞAMA 5 & 6: Sinematik 3D Logo ve "CNDN TV" Tipografisi (0.65..1.00)
-        val fullLogoAlpha = ((progress - 0.65f) / 0.20f).coerceIn(0f, 1f)
-        if (fullLogoAlpha > 0f) {
-            val b = logoBitmap
-            if (b != null && !b.isRecycled) {
-                val dstSize = 340f * scale
-                val dstRect = RectF(cx - dstSize / 2f, cy - dstSize / 2f - 18f * scale, cx + dstSize / 2f, cy + dstSize / 2f - 18f * scale)
-                logoBitmapPaint.alpha = (255 * fullLogoAlpha).toInt()
-                canvas.drawBitmap(b, null, dstRect, logoBitmapPaint)
-            } else {
-                // Tipografi çizimi (vektörel yedek)
-                val textSize = 54f * scale
-                textPaintWhite.textSize = textSize
-                textPaintOrange.textSize = textSize
-                textPaintOrange.shader = LinearGradient(
-                    cx, 0f, cx + 80f * scale, 0f,
-                    Color.parseColor("#299CFF"), Color.parseColor("#28D9C5"),
+            // 4. Parlaklık Geçişi (Studio Shimmer Sheen: 0.35 -> 0.75)
+            val shimmerProgress = ((progress - 0.32f) / 0.40f).coerceIn(0f, 1f)
+            if (shimmerProgress in 0.01f..0.99f) {
+                val shimmerX = left - baseSize * 0.5f + (baseSize * 2.0f * shimmerProgress)
+                shimmerPaint.shader = LinearGradient(
+                    shimmerX - 50f * scale, top,
+                    shimmerX + 50f * scale, bottom,
+                    intArrayOf(
+                        Color.TRANSPARENT,
+                        Color.argb((80 * logoAlpha).toInt(), 255, 255, 255),
+                        Color.TRANSPARENT
+                    ),
+                    floatArrayOf(0f, 0.5f, 1.0f),
                     Shader.TileMode.CLAMP
                 )
-                val textY = cy + tvHeight / 2f + 56f * scale
-                val alphaInt = (255 * fullLogoAlpha).toInt()
-                textPaintWhite.alpha = alphaInt
-                textPaintOrange.alpha = alphaInt
-                canvas.drawText("CNDN ", cx, textY, textPaintWhite)
-                canvas.drawText("TV", cx, textY, textPaintOrange)
+                canvas.drawRect(dstRect, shimmerPaint)
             }
+        }
+
+        // 5. Alt Başlık & Tipografi (0.25 -> 0.60)
+        val textAlpha = ((progress - 0.22f) / 0.30f).coerceIn(0f, 1f)
+        if (textAlpha > 0f) {
+            val textY = cy + 155f * scale
+            textPaint.textSize = 13.5f * scale
+            textPaint.alpha = (210 * textAlpha).toInt()
+            canvas.drawText("CANLI TELEVİZYON YAYIN PLATFORMU", cx, textY, textPaint)
+
+            badgePaint.textSize = 10.5f * scale
+            badgePaint.alpha = (180 * textAlpha).toInt()
+            canvas.drawText("HD / 4K FTA KESİNTİSİZ YAYIN", cx, textY + 22f * scale, badgePaint)
+        }
+
+        // 6. Minimalist İnce Neon Yükleme Çubuğu (Loading Progress Bar)
+        val barAlpha = ((progress - 0.15f) / 0.25f).coerceIn(0f, 1f)
+        if (barAlpha > 0f) {
+            val barW = 160f * scale
+            val barH = 3.5f * scale
+            val barY = cy + 205f * scale
+            val barRect = RectF(cx - barW / 2f, barY - barH / 2f, cx + barW / 2f, barY + barH / 2f)
+
+            barBgPaint.alpha = (45 * barAlpha).toInt()
+            canvas.drawRoundRect(barRect, barH / 2f, barH / 2f, barBgPaint)
+
+            val fillW = barW * progress.coerceIn(0f, 1f)
+            val fillRect = RectF(cx - barW / 2f, barY - barH / 2f, cx - barW / 2f + fillW, barY + barH / 2f)
+
+            barProgressPaint.shader = LinearGradient(
+                barRect.left, barRect.top, barRect.right, barRect.top,
+                intArrayOf(
+                    Color.parseColor("#28D9C5"), // Turkuaz
+                    Color.parseColor("#299CFF"), // Elektrik mavisi
+                    Color.parseColor("#FF9F2E")  // Sıcak altın
+                ),
+                null,
+                Shader.TileMode.CLAMP
+            )
+            barProgressPaint.alpha = (255 * barAlpha).toInt()
+            canvas.drawRoundRect(fillRect, barH / 2f, barH / 2f, barProgressPaint)
         }
     }
 }

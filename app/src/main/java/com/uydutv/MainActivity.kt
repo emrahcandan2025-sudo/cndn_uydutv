@@ -33,6 +33,8 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -226,7 +228,7 @@ class MainActivity : Activity() {
         sv.setOnClickListener { finishSplash() }
         root.addView(sv, FrameLayout.LayoutParams(-1, -1))
         splashView = sv
-        handler.postDelayed(splashTimeout, 4500)
+        handler.postDelayed(splashTimeout, 2200)
     }
 
     private fun finishSplash() {
@@ -296,7 +298,16 @@ class MainActivity : Activity() {
             .setBufferDurationsMs(8_000, 30_000, 1_500, 3_000)
             .build()
         val renderers = DefaultRenderersFactory(this).setEnableDecoderFallback(true)
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(25000)
+            .setAllowCrossProtocolRedirects(true)
+        val mediaSourceFactory = DefaultMediaSourceFactory(this)
+            .setDataSourceFactory(httpDataSourceFactory)
+
         return ExoPlayer.Builder(this, renderers)
+            .setMediaSourceFactory(mediaSourceFactory)
             .setTrackSelector(selector)
             .setBandwidthMeter(meter)
             .setLoadControl(load)
@@ -490,7 +501,14 @@ class MainActivity : Activity() {
                 setStroke(dp(1.8f), colorAccent)
             }
             elevation = dp(16).toFloat()
-            setOnClickListener { openGuide() }
+            setOnClickListener {
+                val streams = if (currentChannel.streamUrls.isNotEmpty()) currentChannel.streamUrls else listOfNotNull(currentChannel.streamUrl)
+                if (streams.size > 1) {
+                    switchStreamSource(1)
+                } else {
+                    openGuide()
+                }
+            }
         }
         infoTitle = text("", 27f, colorTextWhite, true).apply {
             letterSpacing = 0.02f
@@ -659,10 +677,27 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * Kanalın varsa diğer yayın kaynakları (alternatif akışlar) arasında geçiş yapar (◂ Sol / Sağ ▸ tuşları).
+     */
+    private fun switchStreamSource(delta: Int) {
+        val c = currentChannel
+        val streams = if (c.streamUrls.isNotEmpty()) c.streamUrls else listOfNotNull(c.streamUrl)
+        if (streams.size <= 1) {
+            Toast.makeText(this, "${c.name} için tek yayın kaynağı kayıtlı", Toast.LENGTH_SHORT).show()
+            return
+        }
+        streamAttemptIndex = ((streamAttemptIndex + delta) % streams.size + streams.size) % streams.size
+        val sourceNumber = streamAttemptIndex + 1
+        Toast.makeText(this, "${c.name} · Kaynak $sourceNumber/${streams.size} açılıyor...", Toast.LENGTH_SHORT).show()
+        playCurrentChannel(tryNextStream = false)
+    }
+
     private fun showChannelInfo(loadLatencyMs: Long? = null) {
         val c = currentChannel
-        val totalStreams = c.streamUrls.size
-        val streamStr = if (totalStreams > 1) "   [Kaynak ${streamAttemptIndex + 1}/$totalStreams]" else ""
+        val streams = if (c.streamUrls.isNotEmpty()) c.streamUrls else listOfNotNull(c.streamUrl)
+        val totalStreams = streams.size
+        val streamStr = if (totalStreams > 1) "   [Kaynak ${streamAttemptIndex + 1}/$totalStreams · ◂ ▸ Değiştir]" else ""
 
         infoTitle.text = String.format(Locale.getDefault(), "%03d   %s%s", c.number, c.name, streamStr)
         val now = System.currentTimeMillis()
@@ -1051,6 +1086,8 @@ class MainActivity : Activity() {
             }
         }
         when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT -> { switchStreamSource(-1); return true }
+            KeyEvent.KEYCODE_DPAD_RIGHT -> { switchStreamSource(1); return true }
             KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_DPAD_DOWN -> { changeChannel(1); return true }
             KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_DPAD_UP -> { changeChannel(-1); return true }
             KeyEvent.KEYCODE_GUIDE, KeyEvent.KEYCODE_G -> { openGuide(); return true }

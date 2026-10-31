@@ -197,4 +197,23 @@ class PlaylistLoaderTest {
             assertTrue("İzin durumu belirtilmeli: ${channel.name}", channel.permissionStatus.isNotBlank())
         }
     }
+
+    @Test
+    fun testStarTvUnrestrictedStreamPrioritization() {
+        val m3uWithRestrictedStar = """
+            #EXTM3U
+            #EXTINF:-1 tvg-id="StarTV.tr" group-title="Ulusal",Star TV
+            https://dogus.daioncdn.net/startv/startv_720p.m3u8?app=a20ac41e-bdc3-4aa1-934d-26b484480ac9&ce=3&sid=8l4w3lst4co5
+        """.trimIndent()
+
+        val parsed = PlaylistLoader.parse(m3uWithRestrictedStar)
+        val merged = PlaylistLoader.mergeChannelLists(listOf(parsed))
+        val star = merged.firstOrNull { it.number == 4 }
+
+        assertNotNull(star)
+        assertTrue("Star TV en az bir akışa sahip olmalı", star!!.streamUrls.isNotEmpty())
+        // İlk akışın kısıtlamasız (ce=3 olmayan) Avrupa veya MNCDN yayını olduğunu doğrula
+        assertFalse("İlk yayın ce=3 bölgesel kısıtlama içermemeli", star.streamUrls[0].contains("ce=3"))
+        assertTrue("İlk yayın geçerli bir hls akışı olmalı", star.streamUrls[0].contains("m3u8") || star.streamUrls[0].contains("star"))
+    }
 }

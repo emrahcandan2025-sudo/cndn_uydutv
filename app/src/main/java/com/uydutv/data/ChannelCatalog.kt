@@ -75,8 +75,16 @@ object ChannelCatalog {
             notes = "Resmî Demirören Medya canlı yayın sayfası.",
             permissionStatus = "Ulusal Karasal / Uydu FTA"),
         TvChannel(4, "startv", "Star TV", officialLivePage = "https://www.startv.com.tr/canli-yayin",
+            streamUrl = "https://dygvideo.dygdigital.com/live/hls/staravrupa?token=de13baf2a095e421aad499fa34d560d9205ec5b4b28a3371",
+            streamUrls = listOf(
+                "https://dygvideo.dygdigital.com/live/hls/staravrupa?token=de13baf2a095e421aad499fa34d560d9205ec5b4b28a3371",
+                "https://dygvideo.dygdigital.com/live/hls/startv?token=de13baf2a095e421aad499fa34d560d9205ec5b4b28a3371",
+                "https://dogus.daioncdn.net/startv/startv.m3u8?app=startv_web",
+                "https://dogus.daioncdn.net/startv/startv_720p.m3u8?app=a20ac41e-bdc3-4aa1-934d-26b484480ac9&ce=3&sid=8l4w3lst4co5"
+            ),
+            streamStatus = VerificationStatus.VERIFIED,
             groups = listOf("Ulusal", "Genel"), xmltvId = "startv.tr",
-            notes = "Resmî Doğuş Yayın Grubu canlı yayın sayfası.",
+            notes = "Resmî Doğuş Yayın Grubu canlı yayın sayfası ve alternatif akışları.",
             permissionStatus = "Ulusal Karasal / Uydu FTA"),
         TvChannel(5, "showtv", "Show TV", officialLivePage = "https://www.showtv.com.tr/canli-yayin",
             groups = listOf("Ulusal", "Genel"), xmltvId = "showtv.tr",
@@ -271,7 +279,16 @@ object ChannelCatalog {
         TvChannel(50, "kanalfirat", "Kanal Fırat", officialLivePage = "https://www.kanalfirat.com/canli-yayin",
             groups = listOf("Yerel"), xmltvId = "kanalfirat.tr",
             notes = "Elazığ ve Doğu Anadolu yerel televizyon yayını.",
-            permissionStatus = "Bölgesel / Yerel FTA")
+            permissionStatus = "Bölgesel / Yerel FTA"),
+        TvChannel(51, "eurostar", "Euro Star", officialLivePage = "https://www.eurostartv.com.tr/canli-izle",
+            streamUrl = "https://dygvideo.dygdigital.com/live/hls/staravrupa?token=de13baf2a095e421aad499fa34d560d9205ec5b4b28a3371",
+            streamUrls = listOf(
+                "https://dygvideo.dygdigital.com/live/hls/staravrupa?token=de13baf2a095e421aad499fa34d560d9205ec5b4b28a3371"
+            ),
+            streamStatus = VerificationStatus.VERIFIED,
+            groups = listOf("Ulusal", "Genel"), xmltvId = "startv.tr",
+            notes = "Resmî Doğuş Yayın Grubu Euro Star TV (bölgesel kısıtlamasız yayın).",
+            permissionStatus = "Ulusal Uydu / Web FTA")
     )
 
     /** Kanal adına göre katalogdaki resmî sayfayı ve meta bilgileri bulur. */
