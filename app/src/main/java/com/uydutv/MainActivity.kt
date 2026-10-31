@@ -1,6 +1,7 @@
 package com.uydutv
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
@@ -17,6 +18,7 @@ import android.view.KeyEvent
 import android.view.TextureView
 import android.view.View
 import android.view.WindowManager
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -40,9 +42,14 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.uydutv.data.ChannelCatalog
 import com.uydutv.data.ChannelOrder
+import com.uydutv.data.CustomPlaylistManager
 import com.uydutv.data.PlaylistLoader
+import com.uydutv.data.ProgramReminder
+import com.uydutv.data.ProgramReminderManager
 import com.uydutv.data.StreamHealthManager
 import com.uydutv.data.TvChannel
+import com.uydutv.ui.RadioScreensaverView
+import com.uydutv.ui.WeatherTimeWidget
 import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
@@ -150,6 +157,26 @@ class MainActivity : Activity() {
         }
     }
 
+    // Canlı Hava Durumu & Saat Widget'ı
+    private var weatherWidget: WeatherTimeWidget? = null
+
+    // OLED Yanma Korumalı Canlı Radyo Ekran Koruyucusu
+    private var radioScreensaver: RadioScreensaverView? = null
+
+    // Canlı Yayını Duraklatma (Time-Shift) Durumu
+    private var isTimeShiftPaused = false
+
+    // Otomatik Akıllı Kaynak Kurtarma (Stall Fallback)
+    private val stallFallbackRunnable = Runnable { checkStallAndFallback() }
+
+    // Program Hatırlatıcısı Periyodik Kontrolcüsü (25 saniyede bir)
+    private val reminderChecker = object : Runnable {
+        override fun run() {
+            checkProgramReminders()
+            handler.postDelayed(this, 25000L)
+        }
+    }
+
     // Premium Renk Paleti (CNDN TV)
     private val colorBgDark = Color.parseColor("#101A30")      // Ana arka plan: Koyu lacivert
     private val colorBgSecondary = Color.parseColor("#17243D") // İkincil arka plan: Gece mavisi
@@ -229,6 +256,8 @@ class MainActivity : Activity() {
             Log.i("MainActivity", "Önbellek güncel (${(now - lastUpdate) / 60000} dk önce); 6 saatlik kural gereği ağ yenilemesi atlandı.")
         }
         loadEpg()
+        loadCustomPlaylists()
+        handler.postDelayed(reminderChecker, 10000L)
         resetIdleTimer()
     }
 
@@ -291,11 +320,14 @@ class MainActivity : Activity() {
                     }
                     hideLoadingLogo()
                     statusText.visibility = View.GONE
+                    handler.removeCallbacks(stallFallbackRunnable)
                     retryCount = 0
                     skipChain = 0
                     showChannelInfo()
                 } else if (playbackState == Player.STATE_BUFFERING && ChannelCatalog.playableStream(currentChannel) != null) {
                     showLoadingLogo()
+                    handler.removeCallbacks(stallFallbackRunnable)
+                    handler.postDelayed(stallFallbackRunnable, 6000L)
                 }
             }
 
@@ -490,6 +522,23 @@ class MainActivity : Activity() {
         }
         root.addView(flash, FrameLayout.LayoutParams(-1, -1))
 
+        radioScreensaver = RadioScreensaverView(this).apply {
+            visibility = View.GONE
+            setOnClickListener {
+                visibility = View.GONE
+                showChannelInfo()
+            }
+        }
+        root.addView(radioScreensaver, FrameLayout.LayoutParams(-1, -1))
+
+        weatherWidget = WeatherTimeWidget(this).apply {
+            layoutParams = FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
+                topMargin = dp(24)
+                marginEnd = dp(28)
+            }
+        }
+        root.addView(weatherWidget)
+
         statusText = text("CNDN TV", 18f, colorTextWhite, true).apply {
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
@@ -608,6 +657,28 @@ class MainActivity : Activity() {
         }
         guidePanel.addView(guideTitle)
 
+        val btnAddM3u = TextView(this).apply {
+            text = "➕ Özel M3U Listesi Ekle"
+            textSize = 12f
+            setTextColor(colorTurquoise)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(10).toFloat()
+                setColor(Color.argb(80, 23, 36, 61))
+                setStroke(dp(1), Color.argb(120, 40, 217, 197))
+            }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { showAddCustomM3uDialog() }
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
+                topMargin = dp(6)
+                bottomMargin = dp(4)
+            }
+        }
+        guidePanel.addView(btnAddM3u)
+
         guidePanel.addView(text("◂  Kategori değiştir   ·   OK: İzle   ·   GERİ: Kapat", 13f, colorTextMuted, false).apply {
             setPadding(dp(8), dp(10), dp(8), dp(14))
             isClickable = true
@@ -701,6 +772,16 @@ class MainActivity : Activity() {
             p.setMediaItem(mediaItem)
             p.prepare()
             p.playWhenReady = true
+            isTimeShiftPaused = false
+
+            if ("Radyo" in channel.groups) {
+                radioScreensaver?.visibility = View.VISIBLE
+                radioScreensaver?.setStation(channel.name, channel.notes ?: "Canlı Radyo · HD Ses")
+                radioScreensaver?.start()
+            } else {
+                radioScreensaver?.stop()
+                radioScreensaver?.visibility = View.GONE
+            }
         } catch (_: Exception) {
             handlePlayerError()
         }
@@ -733,12 +814,13 @@ class MainActivity : Activity() {
         val now = System.currentTimeMillis()
         val cur = findProgram(c, now)
         val next = findNextProgram(c, now)
+        val reminderCue = if (next != null) "   ·   [🟡/R: Hatırlatıcı Kur]" else ""
         infoSubtitle.text = if (cur != null) {
             val timeFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
             val curTime = "${timeFmt.format(Date(cur.start))} - ${timeFmt.format(Date(cur.end))}"
-            "● CANLI   ${cur.title} ($curTime)   ·   Sonraki: ${next?.title ?: "—"}   ·   [OK: Kanal Listesi]"
+            "● CANLI   ${cur.title} ($curTime)   ·   Sonraki: ${next?.title ?: "—"}$reminderCue   ·   [OK: Liste · ⏯: Duraklat]"
         } else {
-            "● CANLI YAYIN   ·   Program rehberi bilgisi aranıyor   ·   [OK: Kanal Listesi]"
+            "● CANLI YAYIN   ·   Program rehberi bilgisi aranıyor   ·   [OK: Liste · ⏯: Duraklat]"
         }
         infoPanel.visibility = View.VISIBLE
         overlayVisible = true
@@ -754,6 +836,171 @@ class MainActivity : Activity() {
 
     private fun findProgram(c: TvChannel, now: Long): Program? = programsFor(c)?.firstOrNull { it.start <= now && it.end > now }
     private fun findNextProgram(c: TvChannel, now: Long): Program? = programsFor(c)?.firstOrNull { it.start > now }
+
+    /**
+     * Otomatik Akıllı Kaynak Kurtarma:
+     * Yayın donduğunda veya takıldığında alternatif akış varsa kesintisiz geçiş yapar.
+     */
+    private fun checkStallAndFallback() {
+        val streams = if (currentChannel.streamUrls.isNotEmpty()) currentChannel.streamUrls else listOfNotNull(currentChannel.streamUrl)
+        if (streams.size > 1 && streamAttemptIndex + 1 < streams.size) {
+            Toast.makeText(this, "Yayın takıldı · Alternatif kaynak deneniyor (${streamAttemptIndex + 2}/${streams.size})...", Toast.LENGTH_SHORT).show()
+            playCurrentChannel(tryNextStream = true)
+        }
+    }
+
+    /**
+     * Canlı Yayını Duraklatma ve Devam Ettirme (Time-Shift)
+     */
+    private fun toggleTimeShiftPause() {
+        val p = player ?: return
+        if (p.isPlaying) {
+            p.pause()
+            isTimeShiftPaused = true
+            showTimeShiftHud("⏸ YAYIN DURAKLATILDI · Canlıdan geridesiniz")
+        } else {
+            p.play()
+            isTimeShiftPaused = false
+            showTimeShiftHud("▶ OYNATILIYOR")
+        }
+    }
+
+    /**
+     * Canlı yayında ileri / geri sarma
+     */
+    private fun timeShiftSeek(deltaMs: Long) {
+        val p = player ?: return
+        val current = p.currentPosition
+        val target = (current + deltaMs).coerceAtLeast(0L)
+        p.seekTo(target)
+        val sec = Math.abs(deltaMs) / 1000
+        val label = if (deltaMs < 0) "⏪ $sec sn geri alındı" else "⏩ $sec sn ileri alındı"
+        showTimeShiftHud(label)
+    }
+
+    /**
+     * Canlı yayın noktasına anında dönüş
+     */
+    private fun jumpToLiveEdge() {
+        val p = player ?: return
+        p.seekToDefaultPosition()
+        p.play()
+        isTimeShiftPaused = false
+        showTimeShiftHud("🔴 CANLI YAYINA DÖNÜLDÜ")
+    }
+
+    private fun showTimeShiftHud(msg: String) {
+        infoTitle.text = String.format(Locale.getDefault(), "%03d   %s   [%s]", currentChannel.number, currentChannel.name, currentResolution)
+        infoSubtitle.text = "$msg   ·   [▶/OK: Oynat · ◀◀/▶▶: 30s Sar · 🟢 Canlıya Dön]"
+        infoPanel.visibility = View.VISIBLE
+        overlayVisible = true
+        resetIdleTimer()
+    }
+
+    /**
+     * Program Hatırlatıcısı Kontrolü ve Bildirimi
+     */
+    private fun checkProgramReminders() {
+        val due = ProgramReminderManager.checkDueReminders(this)
+        for (r in due) {
+            showProgramReminderDialog(r)
+        }
+    }
+
+    private fun showProgramReminderDialog(reminder: ProgramReminder) {
+        AlertDialog.Builder(this)
+            .setTitle("🔔 Program Başlıyor!")
+            .setMessage("\"${reminder.programTitle}\" şimdi ${reminder.channelName} kanalında başlıyor.\n\nKanala geçmek ister misiniz?")
+            .setPositiveButton("Kanala Git") { _, _ ->
+                val list = ChannelCatalog.channels
+                val idx = list.indexOfFirst { it.id == reminder.channelId || it.number == reminder.channelNumber }
+                if (idx >= 0) {
+                    channelIndex = idx
+                    playCurrentChannel()
+                }
+            }
+            .setNegativeButton("Kapat", null)
+            .show()
+    }
+
+    private fun toggleReminderForNextProgram() {
+        val c = currentChannel
+        val now = System.currentTimeMillis()
+        val next = findNextProgram(c, now) ?: findProgram(c, now)
+        if (next == null) {
+            Toast.makeText(this, "${c.name} için yayın akışı programı bulunamadı", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (ProgramReminderManager.hasReminder(this, c.id, next.title)) {
+            Toast.makeText(this, "'${next.title}' için hatırlatıcı zaten kurulu", Toast.LENGTH_SHORT).show()
+        } else {
+            val r = ProgramReminder(
+                id = "${c.id}_${next.start}",
+                channelId = c.id,
+                channelNumber = c.number,
+                channelName = c.name,
+                programTitle = next.title,
+                startTimeMs = next.start
+            )
+            ProgramReminderManager.addReminder(this, r)
+            Toast.makeText(this, "🔔 '${next.title}' için hatırlatıcı kuruldu!", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /**
+     * Harici M3U / Kullanıcı Özel IPTV Listesi Yükleme ve Diyaloğu
+     */
+    private fun loadCustomPlaylists() {
+        runOnWorker {
+            val custom = CustomPlaylistManager.fetchCustomChannels(this)
+            if (custom.isNotEmpty()) {
+                handler.post {
+                    if (isFinishing || isDestroyed) return@post
+                    ChannelCatalog.setAll(ChannelCatalog.all + custom)
+                    Log.i("MainActivity", "Özel M3U listesinden ${custom.size} kanal eklendi.")
+                }
+            }
+        }
+    }
+
+    private fun showAddCustomM3uDialog() {
+        val input = EditText(this).apply {
+            hint = "https://ornek.com/iptv_listesi.m3u"
+            setSingleLine(true)
+            val pad = dp(16)
+            setPadding(pad, pad, pad, pad)
+            val saved = CustomPlaylistManager.getCustomUrls(this@MainActivity).firstOrNull()
+            if (!saved.isNullOrBlank()) setText(saved)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("🌐 Harici M3U / IPTV Listesi Ekle")
+            .setMessage("Kendi M3U veya M3U8 oynatma listesi URL'nizi girin. Eklenen kanallar 'Özel M3U Listesi' kategorisine eklenecektir.")
+            .setView(input)
+            .setPositiveButton("İndir ve Ekle") { _, _ ->
+                val url = input.text.toString().trim()
+                if (url.startsWith("http://") || url.startsWith("https://")) {
+                    CustomPlaylistManager.saveCustomUrl(this, url)
+                    Toast.makeText(this, "Özel liste indiriliyor...", Toast.LENGTH_SHORT).show()
+                    runOnWorker {
+                        val channels = CustomPlaylistManager.fetchCustomChannels(this)
+                        handler.post {
+                            if (channels.isNotEmpty()) {
+                                ChannelCatalog.setAll(ChannelCatalog.all + channels)
+                                if (guideVisible) openGuide()
+                                Toast.makeText(this@MainActivity, "✅ ${channels.size} özel kanal eklendi!", Toast.LENGTH_LONG).show()
+                            } else {
+                                Toast.makeText(this@MainActivity, "M3U listesinden kanal okunamadı. Bağlantıyı kontrol edin.", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                } else {
+                    Toast.makeText(this, "Geçerli bir http/https linki giriniz", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("İptal", null)
+            .show()
+    }
 
     private fun cell(value: String, widthPx: Int, bold: Boolean): TextView =
         text(value, 20f, colorTextWhite, bold).apply {
@@ -1145,8 +1392,39 @@ class MainActivity : Activity() {
                 handler.removeCallbacks(numberCommit); handler.postDelayed(numberCommit, 1200)
                 resetIdleTimer(); return true
             }
-            KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_REWIND, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
-                player?.seekToDefaultPosition(); player?.playWhenReady = true; resetIdleTimer(); return true
+            KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_SPACE -> {
+                toggleTimeShiftPause()
+                return true
+            }
+            KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                player?.play()
+                isTimeShiftPaused = false
+                showTimeShiftHud("▶ OYNATILIYOR")
+                return true
+            }
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                toggleTimeShiftPause()
+                return true
+            }
+            KeyEvent.KEYCODE_MEDIA_REWIND -> {
+                timeShiftSeek(-30_000L)
+                return true
+            }
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
+                timeShiftSeek(30_000L)
+                return true
+            }
+            KeyEvent.KEYCODE_PROG_GREEN -> {
+                jumpToLiveEdge()
+                return true
+            }
+            KeyEvent.KEYCODE_PROG_YELLOW, KeyEvent.KEYCODE_R -> {
+                toggleReminderForNextProgram()
+                return true
+            }
+            KeyEvent.KEYCODE_PROG_BLUE, KeyEvent.KEYCODE_M -> {
+                showAddCustomM3uDialog()
+                return true
             }
         }
         resetIdleTimer()
@@ -1155,7 +1433,11 @@ class MainActivity : Activity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (guideVisible) {
+        if (radioScreensaver?.visibility == View.VISIBLE) {
+            radioScreensaver?.visibility = View.GONE
+            radioScreensaver?.stop()
+            showChannelInfo()
+        } else if (guideVisible) {
             closeGuide(commit = false)
         } else if (infoPanel.visibility == View.VISIBLE) {
             hideOverlays()
@@ -1173,6 +1455,10 @@ class MainActivity : Activity() {
     override fun onStart() { super.onStart(); if (player != null && ChannelCatalog.playableStream(currentChannel) != null) player?.play() }
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        handler.removeCallbacks(stallFallbackRunnable)
+        handler.removeCallbacks(reminderChecker)
+        radioScreensaver?.stop()
+        radioScreensaver = null
         worker.shutdownNow()
         splashView?.skip()
         splashView = null

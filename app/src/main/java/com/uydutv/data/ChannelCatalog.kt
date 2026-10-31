@@ -288,7 +288,44 @@ object ChannelCatalog {
             streamStatus = VerificationStatus.VERIFIED,
             groups = listOf("Ulusal", "Genel"), xmltvId = "startv.tr",
             notes = "Resmî Doğuş Yayın Grubu Euro Star TV (bölgesel kısıtlamasız yayın).",
-            permissionStatus = "Ulusal Uydu / Web FTA")
+            permissionStatus = "Ulusal Uydu / Web FTA"),
+
+        // === CANLI RADYO KANALLARI ===
+        TvChannel(201, "trtfm", "TRT FM",
+            streamUrl = "https://trt.daioncdn.net/trtfm/trtfm.m3u8",
+            streamStatus = VerificationStatus.VERIFIED,
+            groups = listOf("Radyo"), notes = "TRT FM Canlı Radyo Yayını",
+            permissionStatus = "Kamu Radyo Yayıncısı (FTA)"),
+        TvChannel(202, "trtradyo1", "TRT Radyo 1",
+            streamUrl = "https://trt.daioncdn.net/trtradyo1/trtradyo1.m3u8",
+            streamStatus = VerificationStatus.VERIFIED,
+            groups = listOf("Radyo"), notes = "TRT Radyo 1 Haber ve Kültür",
+            permissionStatus = "Kamu Radyo Yayıncısı (FTA)"),
+        TvChannel(203, "trtradyo3", "TRT Radyo 3",
+            streamUrl = "https://trt.daioncdn.net/trtradyo3/trtradyo3.m3u8",
+            streamStatus = VerificationStatus.VERIFIED,
+            groups = listOf("Radyo"), notes = "TRT Radyo 3 Klasik & Caz",
+            permissionStatus = "Kamu Radyo Yayıncısı (FTA)"),
+        TvChannel(204, "trtturku", "TRT Türkü",
+            streamUrl = "https://trt.daioncdn.net/trtturku/trtturku.m3u8",
+            streamStatus = VerificationStatus.VERIFIED,
+            groups = listOf("Radyo"), notes = "TRT Türkü Halk Müziği",
+            permissionStatus = "Kamu Radyo Yayıncısı (FTA)"),
+        TvChannel(205, "kralfm", "Kral FM",
+            streamUrl = "https://dogus.daioncdn.net/kralfm/kralfm.m3u8",
+            streamStatus = VerificationStatus.VERIFIED,
+            groups = listOf("Radyo"), notes = "Kral FM İlaç Gibi Radyo",
+            permissionStatus = "Ulusal Radyo FTA"),
+        TvChannel(206, "kralpop", "Kral Pop",
+            streamUrl = "https://dogus.daioncdn.net/kralpop/kralpop.m3u8",
+            streamStatus = VerificationStatus.VERIFIED,
+            groups = listOf("Radyo"), notes = "Kral Pop Türkçe Pop Müzik",
+            permissionStatus = "Ulusal Radyo FTA"),
+        TvChannel(207, "bestfm", "Best FM",
+            streamUrl = "https://bestfm.listenpowerapp.com/bestfm/bestfm.stream/playlist.m3u8",
+            streamStatus = VerificationStatus.VERIFIED,
+            groups = listOf("Radyo"), notes = "Best FM Radyonuz Açık Olsun",
+            permissionStatus = "Ulusal Radyo FTA")
     )
 
     /** Kanal adına göre katalogdaki resmî sayfayı ve meta bilgileri bulur. */
@@ -372,7 +409,7 @@ object ChannelCatalog {
         "General", "News", "Sports", "Movies", "Series", "Entertainment", "Kids", "Music", "Documentary",
         "Religious", "Culture", "Education", "Lifestyle", "Comedy", "Animation", "Family", "Business",
         "Cooking", "Travel", "Weather", "Science", "Outdoor", "Classic", "Shop", "Relax", "Legislative",
-        "Ulusal", "Haber", "Spor", "Sinema", "Dizi", "Belgesel", "Müzik", "Çocuk", "Dini", "Yerel"
+        "Ulusal", "Haber", "Spor", "Sinema", "Dizi", "Belgesel", "Müzik", "Çocuk", "Dini", "Yerel", "Radyo", "Özel Liste"
     )
 
     /** Menüdeki kategoriler: önce null (Tümü), sonra listede gerçekten kanalı olanlar. */
@@ -394,6 +431,7 @@ object ChannelCatalog {
         "Travel", "Seyahat" -> "Seyahat"; "Weather", "Hava" -> "Hava Durumu"; "Science", "Bilim" -> "Bilim"
         "Outdoor", "Doğa" -> "Doğa"; "Classic", "Klasik" -> "Klasik"; "Shop", "Alışveriş" -> "Alışveriş"
         "Relax", "Dinlenme" -> "Dinlenme"; "Legislative", "Meclis" -> "Meclis"; "Yerel" -> "Yerel Kanallar"
+        "Radyo" -> "Radyo İstasyonları"; "Özel Liste" -> "Özel M3U Listesi"
         "Undefined" -> "Diğer"
         else -> key ?: "Diğer"
     }
