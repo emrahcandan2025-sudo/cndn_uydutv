@@ -85,6 +85,14 @@ class MainActivity : Activity() {
     private lateinit var btnGuideAction: TextView
     private lateinit var btnAddM3uAction: TextView
 
+    // Premium HUD ve Rehber Bileşenleri
+    private lateinit var badgeLive: TextView
+    private lateinit var badgeRes: TextView
+    private lateinit var badgeSource: TextView
+    private lateinit var epgProgressTrack: FrameLayout
+    private lateinit var epgProgressBar: View
+    private lateinit var categoryChipsRow: LinearLayout
+
     private fun showLoadingLogo() {
         statusText.visibility = View.GONE
         loadingLogo.visibility = View.VISIBLE
@@ -581,15 +589,15 @@ class MainActivity : Activity() {
 
         infoPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(30), dp(18), dp(30), dp(20))
+            setPadding(dp(26), dp(16), dp(26), dp(18))
             background = GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(Color.parseColor("#F617243D"), Color.parseColor("#F0101A30"))
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(Color.parseColor("#F50D182E"), Color.parseColor("#F8070D1B"))
             ).apply {
-                cornerRadius = dp(20).toFloat()
-                setStroke(dp(1.8f), colorAccent)
+                cornerRadius = dp(22).toFloat()
+                setStroke(dp(1.5f), Color.argb(130, 56, 189, 248))
             }
-            elevation = dp(16).toFloat()
+            elevation = dp(22).toFloat()
             setOnClickListener {
                 val streams = if (currentChannel.streamUrls.isNotEmpty()) currentChannel.streamUrls else listOfNotNull(currentChannel.streamUrl)
                 if (streams.size > 1) {
@@ -599,14 +607,92 @@ class MainActivity : Activity() {
                 }
             }
         }
-        infoTitle = text("", 27f, colorTextWhite, true).apply {
+
+        // 1. Üst Başlık Satırı: [Kanal No & Adı] [● CANLI] [720p HD] [Kaynak 1/4]
+        val headerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        infoTitle = text("", 26f, colorTextWhite, true).apply {
             letterSpacing = 0.02f
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(14) }
         }
-        infoSubtitle = text("", 16f, colorTextLight, false).apply {
-            setPadding(0, dp(4), 0, 0)
+        badgeLive = TextView(this).apply {
+            text = "● CANLI"
+            textSize = 11.5f
+            setTextColor(colorTurquoise)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(4), dp(10), dp(4))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(8).toFloat()
+                setColor(Color.argb(80, 40, 217, 197))
+                setStroke(dp(1), Color.argb(140, 40, 217, 197))
+            }
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) }
         }
-        infoPanel.addView(infoTitle)
+        badgeRes = TextView(this).apply {
+            text = "720p HD"
+            textSize = 11.5f
+            setTextColor(Color.parseColor("#F59E0B"))
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(4), dp(10), dp(4))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(8).toFloat()
+                setColor(Color.argb(60, 245, 158, 11))
+                setStroke(dp(1), Color.argb(120, 245, 158, 11))
+            }
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) }
+        }
+        badgeSource = TextView(this).apply {
+            text = "Kaynak 1/1"
+            textSize = 11.5f
+            setTextColor(colorAccent)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(4), dp(10), dp(4))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(8).toFloat()
+                setColor(Color.argb(60, 41, 156, 255))
+                setStroke(dp(1), Color.argb(120, 41, 156, 255))
+            }
+            visibility = View.GONE
+        }
+        headerRow.addView(infoTitle)
+        headerRow.addView(badgeLive)
+        headerRow.addView(badgeRes)
+        headerRow.addView(badgeSource)
+        infoPanel.addView(headerRow)
+
+        // 2. Program Metni
+        infoSubtitle = text("", 15f, colorTextLight, false).apply {
+            setPadding(0, dp(6), 0, 0)
+        }
         infoPanel.addView(infoSubtitle)
+
+        // 3. EPG Canlı İlerleme Çubuğu (Show Progress Bar)
+        epgProgressTrack = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                cornerRadius = dp(3).toFloat()
+                setColor(Color.argb(90, 51, 65, 85))
+            }
+            setPadding(0, 0, 0, 0)
+            visibility = View.GONE
+        }
+        epgProgressBar = View(this).apply {
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(Color.parseColor("#38BDF8"), Color.parseColor("#28D9C5"))
+            ).apply {
+                cornerRadius = dp(3).toFloat()
+            }
+        }
+        epgProgressTrack.addView(epgProgressBar, FrameLayout.LayoutParams(0, dp(4)))
+        infoPanel.addView(epgProgressTrack, LinearLayout.LayoutParams(-1, dp(4)).apply {
+            topMargin = dp(8)
+            bottomMargin = dp(4)
+        })
 
         val actionsScroller = android.widget.HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
@@ -662,36 +748,36 @@ class MainActivity : Activity() {
 
         guidePanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(22), dp(18), dp(20))
+            setPadding(dp(18), dp(20), dp(16), dp(18))
             background = GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(Color.parseColor("#FC101A30"), Color.parseColor("#F817243D"))
+                intArrayOf(Color.parseColor("#F80A1124"), Color.parseColor("#F50D1730"))
             ).apply {
-                setStroke(dp(1.5f), colorBorderSubtle)
+                setStroke(dp(1.2f), Color.argb(100, 56, 189, 248))
             }
             visibility = View.GONE
-            elevation = dp(20).toFloat()
+            elevation = dp(24).toFloat()
         }
 
         // Üst Başlık & CNDN TV Marka Rozeti
         val headerTagLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(6), dp(2), dp(6), dp(12))
+            setPadding(dp(6), dp(2), dp(6), dp(10))
         }
-        val appTitle = text("CNDN TV", 16f, colorAccent, true).apply {
+        val appTitle = text("CNDN TV", 17f, colorAccent, true).apply {
             letterSpacing = 0.14f
         }
         val badgeTag = TextView(this).apply {
             text = "CANLI REHBER"
-            textSize = 11f
+            textSize = 10.5f
             setTextColor(colorTurquoise)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             setPadding(dp(8), dp(3), dp(8), dp(3))
             background = GradientDrawable().apply {
                 cornerRadius = dp(6).toFloat()
-                setColor(Color.argb(120, 23, 36, 61))
+                setColor(Color.argb(100, 15, 23, 42))
                 setStroke(dp(1), Color.argb(140, 40, 217, 197))
             }
             layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) }
@@ -700,48 +786,48 @@ class MainActivity : Activity() {
         headerTagLayout.addView(badgeTag)
         guidePanel.addView(headerTagLayout)
 
-        // Kategori Başlık Kutusu
-        guideTitle = text("KANALLAR", 21f, colorTextWhite, true).apply {
-            setPadding(dp(16), dp(10), dp(16), dp(10))
-            background = GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(Color.parseColor("#3517243D"), Color.parseColor("#45299CFF"))
-            ).apply {
-                cornerRadius = dp(14).toFloat()
-                setStroke(dp(1.5f), colorTurquoise)
-            }
-            isClickable = true
-            setOnClickListener { cycleCategory(1) }
+        // Kategori Yatay Sekmeler Çubuğu (Horizontal Category Tabs)
+        val categoryScroller = android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            setPadding(0, dp(4), 0, dp(6))
         }
-        guidePanel.addView(guideTitle)
+        categoryChipsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        categoryScroller.addView(categoryChipsRow)
+        guidePanel.addView(categoryScroller)
 
+        // Alt Bilgi & Hızlı Butonlar Satırı
+        val guideSubRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(4), dp(4), dp(8))
+        }
+        guideTitle = text("TÜM KANALLAR", 13.5f, colorTurquoise, true).apply {
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+            setPadding(dp(2), 0, dp(2), 0)
+        }
         val btnAddM3u = TextView(this).apply {
-            text = "➕ Özel M3U Listesi Ekle"
-            textSize = 12f
-            setTextColor(colorTurquoise)
+            text = "➕ M3U Ekle"
+            textSize = 11.5f
+            setTextColor(colorAccent)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            setPadding(dp(12), dp(8), dp(12), dp(8))
+            setPadding(dp(10), dp(5), dp(10), dp(5))
             background = GradientDrawable().apply {
-                cornerRadius = dp(10).toFloat()
+                cornerRadius = dp(8).toFloat()
                 setColor(Color.argb(80, 23, 36, 61))
-                setStroke(dp(1), Color.argb(120, 40, 217, 197))
+                setStroke(dp(1), Color.argb(100, 41, 156, 255))
             }
             isClickable = true
             isFocusable = true
             setOnClickListener { showAddCustomM3uDialog() }
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
-                topMargin = dp(6)
-                bottomMargin = dp(4)
-            }
         }
-        guidePanel.addView(btnAddM3u)
-
-        guidePanel.addView(text("◂  Kategori değiştir   ·   OK: İzle   ·   GERİ: Kapat", 13f, colorTextMuted, false).apply {
-            setPadding(dp(8), dp(10), dp(8), dp(14))
-            isClickable = true
-            setOnClickListener { cycleCategory(1) }
-        })
+        guideSubRow.addView(guideTitle)
+        guideSubRow.addView(btnAddM3u)
+        guidePanel.addView(guideSubRow)
 
         val scroller = ScrollView(this).apply {
             clipToPadding = false
@@ -921,22 +1007,45 @@ class MainActivity : Activity() {
         val c = currentChannel
         val streams = if (c.streamUrls.isNotEmpty()) c.streamUrls else listOfNotNull(c.streamUrl)
         val totalStreams = streams.size
-        val streamStr = if (totalStreams > 1) "   [Kaynak ${streamAttemptIndex + 1}/$totalStreams · ◂ ▸ Değiştir]" else ""
-        val resBadge = if (currentResolution.isNotBlank()) "   [$currentResolution]" else ""
 
-        infoTitle.text = String.format(Locale.getDefault(), "%03d   %s%s%s", c.number, c.name, streamStr, resBadge)
+        infoTitle.text = String.format(Locale.getDefault(), "%03d  %s", c.number, c.name)
+        badgeRes.text = currentResolution
+
+        if (totalStreams > 1) {
+            badgeSource.visibility = View.VISIBLE
+            badgeSource.text = "Kaynak ${streamAttemptIndex + 1}/$totalStreams · ◂ ▸"
+        } else {
+            badgeSource.visibility = View.GONE
+        }
+
         val now = System.currentTimeMillis()
         val cur = findProgram(c, now)
         val next = findNextProgram(c, now)
-        val reminderCue = if (next != null) "   ·   [🟡/R: Hatırlatıcı Kur]" else ""
-        infoSubtitle.text = if (cur != null) {
+        val reminderCue = if (next != null) "   ·   [🟡/R: Hatırlatıcı]" else ""
+
+        if (cur != null) {
             val timeFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
             val curTime = "${timeFmt.format(Date(cur.start))} - ${timeFmt.format(Date(cur.end))}"
-            "● CANLI   ${cur.title} ($curTime)   ·   Sonraki: ${next?.title ?: "—"}$reminderCue   ·   [OK: Liste · ⏯: Duraklat]"
+            val totalDuration = (cur.end - cur.start).coerceAtLeast(1L)
+            val elapsed = (now - cur.start).coerceIn(0L, totalDuration)
+            val percent = elapsed.toFloat() / totalDuration.toFloat()
+            val remainingMin = ((cur.end - now) / 60000L).coerceAtLeast(0L)
+
+            infoSubtitle.text = "${cur.title} ($curTime · ${remainingMin} dk kaldı)   ·   Sonraki: ${next?.title ?: "—"}$reminderCue"
+
+            epgProgressTrack.visibility = View.VISIBLE
+            epgProgressTrack.post {
+                val trackWidth = epgProgressTrack.width
+                if (trackWidth > 0) {
+                    val fillWidth = (trackWidth * percent).toInt().coerceIn(dp(6), trackWidth)
+                    epgProgressBar.layoutParams = FrameLayout.LayoutParams(fillWidth, dp(4))
+                }
+            }
         } else {
-            "● CANLI YAYIN   ·   Program rehberi bilgisi aranıyor   ·   [OK: Liste · ⏯: Duraklat]"
+            infoSubtitle.text = "● CANLI YAYIN   ·   Program rehberi bilgisi aranıyor   ·   [OK: Liste · ⏯: Duraklat]"
+            epgProgressTrack.visibility = View.GONE
         }
-        infoPanel.visibility = View.VISIBLE
+
         if (::btnTimeShiftPlayPause.isInitialized) {
             btnTimeShiftPlayPause.text = if (isTimeShiftPaused) "▶ Devam Et" else "⏸ Duraklat"
             val hasRem = next != null && ProgramReminderManager.hasReminder(this, c.id, next.title)
@@ -1015,7 +1124,8 @@ class MainActivity : Activity() {
     }
 
     private fun showTimeShiftHud(msg: String) {
-        infoTitle.text = String.format(Locale.getDefault(), "%03d   %s   [%s]", currentChannel.number, currentChannel.name, currentResolution)
+        infoTitle.text = String.format(Locale.getDefault(), "%03d  %s", currentChannel.number, currentChannel.name)
+        badgeRes.text = currentResolution
         infoSubtitle.text = "$msg   ·   [▶/OK: Oynat · ◀◀/▶▶: 30s Sar · 🟢 Canlıya Dön]"
         if (::btnTimeShiftPlayPause.isInitialized) {
             btnTimeShiftPlayPause.text = if (isTimeShiftPaused) "▶ Devam Et" else "⏸ Duraklat"
@@ -1147,13 +1257,18 @@ class MainActivity : Activity() {
             layoutParams = if (widthPx > 0) LinearLayout.LayoutParams(widthPx, -2) else LinearLayout.LayoutParams(0, -2, 1f)
         }
 
-    /** Bölünmüş ekran: sol %40 kanal listesi, sağda 16:9 önizleme + altında kanal bilgisi. */
+    /** Bölünmüş ekran: sol %40 kanal listesi, sağda 16:9 sinematik önizleme + altında kanal bilgisi. */
     private fun applyLayout(split: Boolean) {
         val w = resources.displayMetrics.widthPixels
         if (split) {
             val pw = (w * 0.54f).toInt()
             val ph = pw * 9 / 16
             playerView.layoutParams = FrameLayout.LayoutParams(pw, ph, Gravity.END or Gravity.CENTER_VERTICAL).apply { marginEnd = dp(24) }
+            playerView.background = GradientDrawable().apply {
+                cornerRadius = dp(16).toFloat()
+                setStroke(dp(1.5f), Color.argb(120, 56, 189, 248))
+            }
+            playerView.clipToOutline = true
             infoPanel.layoutParams = FrameLayout.LayoutParams(pw, -2, Gravity.END or Gravity.BOTTOM).apply {
                 marginEnd = dp(24)
                 bottomMargin = dp(28)
@@ -1167,6 +1282,8 @@ class MainActivity : Activity() {
             }
         } else {
             playerView.layoutParams = FrameLayout.LayoutParams(-1, -1)
+            playerView.background = null
+            playerView.clipToOutline = false
             infoPanel.layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
                 marginStart = dp(32)
                 marginEnd = dp(32)
@@ -1180,34 +1297,34 @@ class MainActivity : Activity() {
 
     private fun createRowBackground(isFocused: Boolean, isSelected: Boolean): GradientDrawable {
         return if (isFocused) {
-            // Odaklanıldığında: Mavi-Turkuaz geçişli parlak vurgu ve turkuaz kenarlık
+            // Odaklanıldığında: Elektrik Mavisi -> Camgöbeği Turkuaz parlak neon vurgusu
             GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
                 intArrayOf(
-                    Color.argb(235, 30, 110, 205), // Elektrik mavisi tonu
-                    Color.argb(235, 25, 175, 160)  // Turkuaz geçişi
+                    Color.argb(245, 25, 105, 220),
+                    Color.argb(245, 13, 160, 150)
                 )
             ).apply {
                 cornerRadius = dp(14).toFloat()
-                setStroke(dp(2.5f), colorTurquoise)
+                setStroke(dp(2.2f), Color.parseColor("#38BDF8"))
             }
         } else if (isSelected) {
             // Seçili (canlı oynatılan) kanal: Gece mavisi zemin, elektrik mavisi çerçeve
             GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
                 intArrayOf(
-                    Color.argb(180, 23, 45, 75),
-                    Color.argb(160, 20, 70, 80)
+                    Color.argb(195, 15, 30, 58),
+                    Color.argb(175, 12, 45, 58)
                 )
             ).apply {
                 cornerRadius = dp(14).toFloat()
-                setStroke(dp(1.8f), colorAccent)
+                setStroke(dp(1.6f), colorAccent)
             }
         } else {
             // Normal kanal: Koyu lacivert/gece mavisi kart tabanı, ince zarif çerçeve
             GradientDrawable().apply {
                 cornerRadius = dp(14).toFloat()
-                setColor(Color.argb(65, 23, 36, 61))
+                setColor(Color.argb(75, 15, 23, 42))
                 setStroke(dp(1), Color.argb(40, 255, 255, 255))
             }
         }
@@ -1218,13 +1335,94 @@ class MainActivity : Activity() {
         guideVisible = true; overlayVisible = true
         applyLayout(true)
         guideRows.removeAllViews()
-        guideTitle.text = "KANAL LİSTESİ · ◂ ${ChannelCatalog.categoryLabel(ChannelCatalog.category)} ▸ (${ChannelCatalog.channels.size})"
+
+        // 1. Kategori Yatay Sekmelerini Güncelle
+        if (::categoryChipsRow.isInitialized) {
+            categoryChipsRow.removeAllViews()
+            val allCats = ChannelCatalog.categories()
+            allCats.forEach { catKey ->
+                val isCurrentCat = catKey == ChannelCatalog.category
+                val catLabel = when (catKey) {
+                    null -> "⭐ Tümü"
+                    "Ulusal", "General" -> "📺 Ulusal"
+                    "Haber", "News" -> "📰 Haber"
+                    "Spor", "Sports" -> "⚽ Spor"
+                    "Sinema", "Movies" -> "🎬 Film"
+                    "Dizi", "Series" -> "🎭 Dizi"
+                    "Belgesel", "Documentary" -> "🦁 Belgesel"
+                    "Çocuk", "Kids" -> "👶 Çocuk"
+                    "Müzik", "Music" -> "🎵 Müzik"
+                    "Radyo" -> "📻 Radyo"
+                    "Özel Liste" -> "🌐 Özel Liste"
+                    "Yerel" -> "📍 Yerel"
+                    else -> ChannelCatalog.categoryLabel(catKey)
+                }
+                val chip = TextView(this).apply {
+                    text = catLabel
+                    textSize = 12f
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    setPadding(dp(12), dp(6), dp(12), dp(6))
+                    isClickable = true
+                    isFocusable = true
+                    setTextColor(if (isCurrentCat) Color.WHITE else colorTextMuted)
+                    background = if (isCurrentCat) {
+                        GradientDrawable(
+                            GradientDrawable.Orientation.LEFT_RIGHT,
+                            intArrayOf(Color.parseColor("#2563EB"), Color.parseColor("#06B6D4"))
+                        ).apply {
+                            cornerRadius = dp(10).toFloat()
+                        }
+                    } else {
+                        GradientDrawable().apply {
+                            cornerRadius = dp(10).toFloat()
+                            setColor(Color.argb(80, 23, 36, 61))
+                            setStroke(dp(1), Color.argb(60, 255, 255, 255))
+                        }
+                    }
+                    setOnClickListener {
+                        ChannelCatalog.setCategory(catKey)
+                        val playingId = loadedId
+                        val idx = ChannelCatalog.channels.indexOfFirst { it.id == playingId }
+                        channelIndex = if (idx >= 0) idx else 0
+                        openGuide()
+                    }
+                    setOnFocusChangeListener { v, hasFocus ->
+                        if (hasFocus) {
+                            v.animate().scaleX(1.06f).scaleY(1.06f).setDuration(120).start()
+                            if (!isCurrentCat) {
+                                v.background = GradientDrawable().apply {
+                                    cornerRadius = dp(10).toFloat()
+                                    setColor(Color.argb(160, 41, 156, 255))
+                                }
+                                (v as? TextView)?.setTextColor(Color.WHITE)
+                            }
+                        } else {
+                            v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(120).start()
+                            if (!isCurrentCat) {
+                                v.background = GradientDrawable().apply {
+                                    cornerRadius = dp(10).toFloat()
+                                    setColor(Color.argb(80, 23, 36, 61))
+                                    setStroke(dp(1), Color.argb(60, 255, 255, 255))
+                                }
+                                (v as? TextView)?.setTextColor(colorTextMuted)
+                            }
+                        }
+                    }
+                    layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) }
+                }
+                categoryChipsRow.addView(chip)
+            }
+        }
+
+        guideTitle.text = "${ChannelCatalog.categoryLabel(ChannelCatalog.category).uppercase(Locale.getDefault())} (${ChannelCatalog.channels.size} Kanal)"
         val now = System.currentTimeMillis()
         ChannelCatalog.channels.forEachIndexed { index, c ->
             val selected = index == channelIndex
             val current = findProgram(c, now)?.title
             val streamCount = c.streamUrls.size
             val badge = if (streamCount > 1) "$streamCount kaynak" else ""
+            val genreTag = c.groups.firstOrNull() ?: "Genel"
 
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -1260,11 +1458,28 @@ class MainActivity : Activity() {
                     orientation = LinearLayout.VERTICAL
                     layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
                 }
-                val nameView = text(c.name, 19f, colorTextWhite, selected).apply {
+                val titleRow = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                val nameView = text(c.name, 18.5f, colorTextWhite, selected).apply {
                     maxLines = 1
                     ellipsize = TextUtils.TruncateAt.END
+                    layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) }
                 }
-                col.addView(nameView)
+                val genreBadge = TextView(context).apply {
+                    text = genreTag
+                    textSize = 10f
+                    setTextColor(Color.parseColor("#94A3B8"))
+                    setPadding(dp(6), dp(1), dp(6), dp(1))
+                    background = GradientDrawable().apply {
+                        cornerRadius = dp(5).toFloat()
+                        setColor(Color.argb(80, 15, 23, 42))
+                    }
+                }
+                titleRow.addView(nameView)
+                titleRow.addView(genreBadge)
+                col.addView(titleRow)
 
                 val subText = when {
                     current != null && badge.isNotEmpty() -> "$current  ·  $badge"

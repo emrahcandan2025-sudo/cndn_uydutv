@@ -106,13 +106,34 @@ class RadioScreensaverView @JvmOverloads constructor(
         super.onDetachedFromWindow()
     }
 
+    private val auraPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val badgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val badgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#28D9C5")
+        textSize = sp(11)
+        typeface = Typeface.DEFAULT_BOLD
+        textAlign = Paint.Align.CENTER
+        letterSpacing = 0.16f
+    }
+    private val dotLivePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#10B981")
+        style = Paint.Style.FILL
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        // 1. Koyu Sinematik Zemin
+        // 1. Kozmik Sinematik Radyal Zemin
+        val bgShader = android.graphics.RadialGradient(
+            w / 2f, h * 0.45f, w * 0.75f,
+            intArrayOf(Color.parseColor("#131E3A"), Color.parseColor("#080D1A"), Color.parseColor("#020409")),
+            floatArrayOf(0f, 0.55f, 1f),
+            android.graphics.Shader.TileMode.CLAMP
+        )
+        bgPaint.shader = bgShader
         canvas.drawRect(0f, 0f, w, h, bgPaint)
 
         // Belirli aralıklarla OLED burn-in drift hedefini güncelle (-40dp ile +40dp arası)
@@ -127,43 +148,86 @@ class RadioScreensaverView @JvmOverloads constructor(
         val centerY = h / 2f + driftY
 
         // 2. Canlı Radyo Kartı
-        val cardW = dp(420).toFloat().coerceAtMost(w * 0.85f)
-        val cardH = dp(230).toFloat()
+        val cardW = dp(440).toFloat().coerceAtMost(w * 0.88f)
+        val cardH = dp(250).toFloat()
         val cardRect = RectF(centerX - cardW / 2f, centerY - cardH / 2f, centerX + cardW / 2f, centerY + cardH / 2f)
         val corner = dp(24).toFloat()
 
+        // Kartın arkasındaki yumuşak neon ambiyans aurası
+        val auraShader = android.graphics.RadialGradient(
+            centerX, centerY, cardW * 0.65f,
+            intArrayOf(Color.argb(70, 41, 156, 255), Color.argb(25, 40, 217, 197), Color.TRANSPARENT),
+            floatArrayOf(0f, 0.6f, 1f),
+            android.graphics.Shader.TileMode.CLAMP
+        )
+        auraPaint.shader = auraShader
+        canvas.drawCircle(centerX, centerY, cardW * 0.65f, auraPaint)
+
+        // Kart Arka Planı (Derin Gece Mavisi Cam)
+        val cardShader = android.graphics.LinearGradient(
+            cardRect.left, cardRect.top, cardRect.right, cardRect.bottom,
+            intArrayOf(Color.argb(235, 17, 27, 49), Color.argb(245, 9, 14, 26)),
+            null,
+            android.graphics.Shader.TileMode.CLAMP
+        )
+        cardPaint.shader = cardShader
         canvas.drawRoundRect(cardRect, corner, corner, cardPaint)
+
+        // Kartın kenarlığı (Elektrik Mavisi -> Turkuaz)
+        val borderShader = android.graphics.LinearGradient(
+            cardRect.left, cardRect.top, cardRect.right, cardRect.bottom,
+            intArrayOf(Color.parseColor("#38BDF8"), Color.parseColor("#28D9C5")),
+            null,
+            android.graphics.Shader.TileMode.CLAMP
+        )
+        cardBorderPaint.shader = borderShader
+        cardBorderPaint.strokeWidth = dp(1.8f).toFloat()
         canvas.drawRoundRect(cardRect, corner, corner, cardBorderPaint)
 
-        // 3. Ritmik Ses Dalgaları (Spektrum Çubukları)
-        val barCount = 18
-        val barWidth = dp(8).toFloat()
-        val barGap = dp(6).toFloat()
+        // 3. Üst Canlı Yayın & Ses Rozeti
+        val badgeW = dp(170).toFloat()
+        val badgeH = dp(22).toFloat()
+        val badgeTop = cardRect.top + dp(18)
+        val badgeRect = RectF(centerX - badgeW / 2f, badgeTop, centerX + badgeW / 2f, badgeTop + badgeH)
+        badgeBgPaint.color = Color.argb(140, 16, 28, 50)
+        canvas.drawRoundRect(badgeRect, dp(11).toFloat(), dp(11).toFloat(), badgeBgPaint)
+
+        // Yeşil Canlı Noktası
+        canvas.drawCircle(badgeRect.left + dp(14), badgeRect.centerY(), dp(3.5f).toFloat(), dotLivePaint)
+        canvas.drawText("CANLI RADYO · HD SES", centerX + dp(6), badgeRect.centerY() + dp(4), badgeTextPaint)
+
+        // 4. Ritmik Ses Dalgaları (24 Spektrum Çubuğu)
+        val barCount = 24
+        val barWidth = dp(7).toFloat()
+        val barGap = dp(5).toFloat()
         val totalBarW = barCount * barWidth + (barCount - 1) * barGap
         val startBarX = centerX - totalBarW / 2f
-        val waveBaseY = cardRect.top + dp(62)
+        val waveBaseY = cardRect.top + dp(82)
 
         for (i in 0 until barCount) {
-            val waveHeight = dp(10) + dp(32) * (0.5f + 0.5f * sin((animPhase + i * 0.45f).toDouble()).toFloat())
+            val harmonic1 = sin((animPhase + i * 0.38f).toDouble()).toFloat()
+            val harmonic2 = sin((animPhase * 1.5f + i * 0.65f).toDouble()).toFloat() * 0.4f
+            val normHeight = (0.5f + 0.35f * harmonic1 + 0.15f * harmonic2).coerceIn(0.12f, 1.0f)
+            val waveHeight = dp(12) + dp(38) * normHeight
             val bx = startBarX + i * (barWidth + barGap)
             val by = waveBaseY - waveHeight / 2f
 
-            // Mavi-Turkuaz gradient tonu
+            // Mavi -> Turkuaz -> Zümrüt Spektrumu
             val fraction = i.toFloat() / barCount.toFloat()
-            val color = interpolateColor(Color.parseColor("#1E6ECD"), Color.parseColor("#4DEEEA"), fraction)
+            val color = interpolateColor(Color.parseColor("#2563EB"), Color.parseColor("#2DD4BF"), fraction)
             wavePaint.color = color
 
             val barRect = RectF(bx, by, bx + barWidth, by + waveHeight)
             canvas.drawRoundRect(barRect, barWidth / 2f, barWidth / 2f, wavePaint)
         }
 
-        // 4. İstasyon Başlığı ve Frekans
-        canvas.drawText(stationName, centerX, cardRect.top + dp(120), textTitlePaint)
-        canvas.drawText("📻 $stationFreq", centerX, cardRect.top + dp(154), textSubtitlePaint)
+        // 5. İstasyon Başlığı ve Frekans
+        canvas.drawText(stationName, centerX, cardRect.top + dp(142), textTitlePaint)
+        canvas.drawText("📻 $stationFreq", centerX, cardRect.top + dp(174), textSubtitlePaint)
 
-        // 5. Dijital Saat ve Bilgi
+        // 6. Dijital Saat ve OLED Bilgi Metni
         val timeStr = clockFormat.format(Date(now))
-        canvas.drawText("$timeStr  ·  Ekran Koruyucu Aktif (Tuşa basın)", centerX, cardRect.top + dp(195), textClockPaint)
+        canvas.drawText("$timeStr   ·   OLED Panel Koruma Aktif   ·   [OK: Kanallar]", centerX, cardRect.top + dp(216), textClockPaint)
     }
 
     private fun interpolateColor(a: Int, b: Int, proportion: Float): Int {
@@ -178,5 +242,6 @@ class RadioScreensaverView @JvmOverloads constructor(
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+    private fun dp(v: Float): Int = (v * resources.displayMetrics.density).toInt()
     private fun sp(v: Int): Float = v * resources.displayMetrics.scaledDensity
 }

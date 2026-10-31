@@ -54,32 +54,35 @@ class WeatherTimeWidget @JvmOverloads constructor(
     init {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        val dp12 = dp(12)
+        val dp14 = dp(14)
         val dp8 = dp(8)
-        setPadding(dp12, dp8, dp12, dp8)
+        setPadding(dp14, dp8, dp14, dp8)
 
-        // Şık, yarı saydam buzlu cam arka plan
-        background = GradientDrawable().apply {
-            cornerRadius = dp(16).toFloat()
-            setColor(Color.argb(175, 12, 19, 31))
-            setStroke(dp(1), Color.argb(60, 255, 255, 255))
+        // Ultra-Premium buzlu cam (Frosted Glass) arka plan
+        background = GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            intArrayOf(Color.parseColor("#EE0F172A"), Color.parseColor("#F5080E1C"))
+        ).apply {
+            cornerRadius = dp(18).toFloat()
+            setStroke(dp(1.2f), Color.argb(110, 56, 189, 248))
         }
+        elevation = dp(10).toFloat()
 
         // Hava Durumu Metni
         weatherText = TextView(context).apply {
             textSize = 13.5f
-            setTextColor(Color.parseColor("#4DEEEA")) // Turkuaz
+            setTextColor(Color.parseColor("#38BDF8")) // Elektrik Turkuaz
             typeface = Typeface.DEFAULT_BOLD
             text = cachedWeather
-            setPadding(0, 0, dp(10), 0)
+            setPadding(0, 0, dp(12), 0)
         }
 
         // Ayırıcı çizgi
         val divider = TextView(context).apply {
-            textSize = 13.5f
-            setTextColor(Color.argb(80, 255, 255, 255))
+            textSize = 14f
+            setTextColor(Color.argb(120, 100, 116, 139))
             text = "│"
-            setPadding(0, 0, dp(10), 0)
+            setPadding(0, 0, dp(12), 0)
         }
 
         // Tarih ve Saat Kutusu (Dikey)
@@ -93,11 +96,14 @@ class WeatherTimeWidget @JvmOverloads constructor(
             setTextColor(Color.WHITE)
             typeface = Typeface.MONOSPACE
             setTypeface(typeface, Typeface.BOLD)
+            letterSpacing = 0.04f
         }
 
         dateText = TextView(context).apply {
             textSize = 10.5f
-            setTextColor(Color.parseColor("#A0AEC0"))
+            setTextColor(Color.parseColor("#94A3B8"))
+            typeface = Typeface.DEFAULT_BOLD
+            letterSpacing = 0.02f
         }
 
         timeBox.addView(timeText)
@@ -181,4 +187,5 @@ class WeatherTimeWidget @JvmOverloads constructor(
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+    private fun dp(v: Float): Int = (v * resources.displayMetrics.density).toInt()
 }
