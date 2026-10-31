@@ -49,6 +49,13 @@ object CustomPlaylistManager {
         saveAllUrls(context, current)
     }
 
+    fun clearAllUrls(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_URLS)
+            .apply()
+    }
+
     private fun saveAllUrls(context: Context, list: List<String>) {
         val arr = JSONArray()
         list.forEach { arr.put(it) }
@@ -92,7 +99,7 @@ object CustomPlaylistManager {
                                 number = customStartNumber++,
                                 streamStatus = VerificationStatus.USER_PROVIDED,
                                 permissionStatus = "Kullanıcı Özel M3U",
-                                groups = if (rawCh.groups.isNotEmpty()) rawCh.groups else listOf("Özel Liste"),
+                                groups = (rawCh.groups + "Özel Liste").distinct(),
                                 notes = "Harici M3U kaynağından eklendi"
                             )
                             results.add(userChannel)

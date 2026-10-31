@@ -75,6 +75,16 @@ class MainActivity : Activity() {
     private lateinit var guideRows: LinearLayout
     private lateinit var guideTitle: TextView
 
+    // İnteraktif TV Kontrol ve Time-Shift Butonları
+    private lateinit var btnTimeShiftPlayPause: TextView
+    private lateinit var btnTimeShiftRewind: TextView
+    private lateinit var btnTimeShiftForward: TextView
+    private lateinit var btnLiveReturn: TextView
+    private lateinit var btnReminderAction: TextView
+    private lateinit var btnSwitchSourceAction: TextView
+    private lateinit var btnGuideAction: TextView
+    private lateinit var btnAddM3uAction: TextView
+
     private fun showLoadingLogo() {
         statusText.visibility = View.GONE
         loadingLogo.visibility = View.VISIBLE
@@ -367,7 +377,8 @@ class MainActivity : Activity() {
         }
         val meter = DefaultBandwidthMeter.Builder(this).setInitialBitrateEstimate(30_000_000L).build()
         val load = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(8_000, 30_000, 1_500, 3_000)
+            .setBufferDurationsMs(15_000, 60_000, 1_500, 3_000)
+            .setBackBuffer(300_000, true) // Canlı yayın için 5 dakikalık geri sarma (Time-Shift) belleği
             .build()
         val renderers = DefaultRenderersFactory(this).setEnableDecoderFallback(true)
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
@@ -596,6 +607,53 @@ class MainActivity : Activity() {
         }
         infoPanel.addView(infoTitle)
         infoPanel.addView(infoSubtitle)
+
+        val actionsScroller = android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            setPadding(0, dp(10), 0, 0)
+        }
+        val actionsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        btnTimeShiftPlayPause = createActionButton("⏸ Duraklat", isPrimary = true) {
+            toggleTimeShiftPause()
+        }
+        btnTimeShiftRewind = createActionButton("⏪ 30sn Geri") {
+            timeShiftSeek(-30_000L)
+        }
+        btnTimeShiftForward = createActionButton("⏩ 30sn İleri") {
+            timeShiftSeek(30_000L)
+        }
+        btnLiveReturn = createActionButton("🔴 Canlıya Dön") {
+            jumpToLiveEdge()
+        }
+        btnReminderAction = createActionButton("🔔 Hatırlatıcı Kur") {
+            toggleReminderForNextProgram()
+        }
+        btnSwitchSourceAction = createActionButton("◂ Kaynak Değiştir ▸") {
+            switchStreamSource(1)
+        }
+        btnGuideAction = createActionButton("📋 Kanal Listesi") {
+            openGuide()
+        }
+        btnAddM3uAction = createActionButton("🌐 M3U Ekle") {
+            showAddCustomM3uDialog()
+        }
+
+        actionsRow.addView(btnTimeShiftPlayPause)
+        actionsRow.addView(btnTimeShiftRewind)
+        actionsRow.addView(btnTimeShiftForward)
+        actionsRow.addView(btnLiveReturn)
+        actionsRow.addView(btnReminderAction)
+        actionsRow.addView(btnSwitchSourceAction)
+        actionsRow.addView(btnGuideAction)
+        actionsRow.addView(btnAddM3uAction)
+        actionsScroller.addView(actionsRow)
+        infoPanel.addView(actionsScroller)
+
         root.addView(infoPanel, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
             marginStart = dp(32)
             marginEnd = dp(32)
@@ -694,6 +752,62 @@ class MainActivity : Activity() {
         guidePanel.addView(scroller, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(guidePanel, FrameLayout.LayoutParams(-1, -1, Gravity.START))
         setContentView(root)
+    }
+
+    private fun createActionButton(label: String, isPrimary: Boolean = false, onClick: () -> Unit): TextView {
+        return TextView(this).apply {
+            text = label
+            textSize = 13.5f
+            setTextColor(colorTextWhite)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(dp(14), dp(8), dp(14), dp(8))
+            isClickable = true
+            isFocusable = true
+            isFocusableInTouchMode = true
+            background = GradientDrawable().apply {
+                cornerRadius = dp(10).toFloat()
+                if (isPrimary) {
+                    setColor(Color.argb(200, 41, 156, 255))
+                    setStroke(dp(1.5f), colorTurquoise)
+                } else {
+                    setColor(Color.argb(120, 23, 36, 61))
+                    setStroke(dp(1), Color.argb(90, 41, 156, 255))
+                }
+            }
+            setOnFocusChangeListener { v, hasFocus ->
+                if (hasFocus) {
+                    v.animate().scaleX(1.08f).scaleY(1.08f).setDuration(140).start()
+                    v.background = GradientDrawable().apply {
+                        cornerRadius = dp(10).toFloat()
+                        setColor(Color.argb(240, 40, 217, 197))
+                        setStroke(dp(2), Color.WHITE)
+                    }
+                    (v as? TextView)?.setTextColor(Color.parseColor("#101A30"))
+                    resetIdleTimer()
+                } else {
+                    v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(140).start()
+                    v.background = GradientDrawable().apply {
+                        cornerRadius = dp(10).toFloat()
+                        if (isPrimary) {
+                            setColor(Color.argb(200, 41, 156, 255))
+                            setStroke(dp(1.5f), colorTurquoise)
+                        } else {
+                            setColor(Color.argb(120, 23, 36, 61))
+                            setStroke(dp(1), Color.argb(90, 41, 156, 255))
+                        }
+                    }
+                    (v as? TextView)?.setTextColor(colorTextWhite)
+                }
+            }
+            setOnClickListener {
+                resetIdleTimer()
+                onClick()
+            }
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply {
+                marginEnd = dp(8)
+            }
+        }
     }
 
     private fun text(value: String, size: Float, color: Int, bold: Boolean): TextView = TextView(this).apply {
@@ -823,6 +937,17 @@ class MainActivity : Activity() {
             "● CANLI YAYIN   ·   Program rehberi bilgisi aranıyor   ·   [OK: Liste · ⏯: Duraklat]"
         }
         infoPanel.visibility = View.VISIBLE
+        if (::btnTimeShiftPlayPause.isInitialized) {
+            btnTimeShiftPlayPause.text = if (isTimeShiftPaused) "▶ Devam Et" else "⏸ Duraklat"
+            val hasRem = next != null && ProgramReminderManager.hasReminder(this, c.id, next.title)
+            btnReminderAction.text = if (hasRem) "🔔 Hatırlatıcı Aktif" else "🔔 Hatırlatıcı Kur"
+            if (totalStreams > 1) {
+                btnSwitchSourceAction.visibility = View.VISIBLE
+                btnSwitchSourceAction.text = "◂ Kaynak ${streamAttemptIndex + 1}/$totalStreams ▸"
+            } else {
+                btnSwitchSourceAction.visibility = View.GONE
+            }
+        }
         overlayVisible = true
         resetIdleTimer()
     }
@@ -844,7 +969,7 @@ class MainActivity : Activity() {
     private fun checkStallAndFallback() {
         val streams = if (currentChannel.streamUrls.isNotEmpty()) currentChannel.streamUrls else listOfNotNull(currentChannel.streamUrl)
         if (streams.size > 1 && streamAttemptIndex + 1 < streams.size) {
-            Toast.makeText(this, "Yayın takıldı · Alternatif kaynak deneniyor (${streamAttemptIndex + 2}/${streams.size})...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "⚡ Akıllı Kurtarma: Yayın takıldı, alternatif kaynak (${streamAttemptIndex + 2}/${streams.size}) deneniyor...", Toast.LENGTH_LONG).show()
             playCurrentChannel(tryNextStream = true)
         }
     }
@@ -892,6 +1017,9 @@ class MainActivity : Activity() {
     private fun showTimeShiftHud(msg: String) {
         infoTitle.text = String.format(Locale.getDefault(), "%03d   %s   [%s]", currentChannel.number, currentChannel.name, currentResolution)
         infoSubtitle.text = "$msg   ·   [▶/OK: Oynat · ◀◀/▶▶: 30s Sar · 🟢 Canlıya Dön]"
+        if (::btnTimeShiftPlayPause.isInitialized) {
+            btnTimeShiftPlayPause.text = if (isTimeShiftPaused) "▶ Devam Et" else "⏸ Duraklat"
+        }
         infoPanel.visibility = View.VISIBLE
         overlayVisible = true
         resetIdleTimer()
@@ -973,7 +1101,8 @@ class MainActivity : Activity() {
             if (!saved.isNullOrBlank()) setText(saved)
         }
 
-        AlertDialog.Builder(this)
+        val savedUrls = CustomPlaylistManager.getCustomUrls(this)
+        val builder = AlertDialog.Builder(this)
             .setTitle("🌐 Harici M3U / IPTV Listesi Ekle")
             .setMessage("Kendi M3U veya M3U8 oynatma listesi URL'nizi girin. Eklenen kanallar 'Özel M3U Listesi' kategorisine eklenecektir.")
             .setView(input)
@@ -999,7 +1128,16 @@ class MainActivity : Activity() {
                 }
             }
             .setNegativeButton("İptal", null)
-            .show()
+
+        if (savedUrls.isNotEmpty()) {
+            builder.setNeutralButton("Listeleri Temizle (${savedUrls.size})") { _, _ ->
+                CustomPlaylistManager.clearAllUrls(this)
+                ChannelCatalog.setAll(ChannelCatalog.builtIn)
+                if (guideVisible) openGuide()
+                Toast.makeText(this, "Kayıtlı harici listeler temizlendi", Toast.LENGTH_SHORT).show()
+            }
+        }
+        builder.show()
     }
 
     private fun cell(value: String, widthPx: Int, bold: Boolean): TextView =

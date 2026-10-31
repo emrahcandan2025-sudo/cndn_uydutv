@@ -108,6 +108,11 @@ class WeatherTimeWidget @JvmOverloads constructor(
         addView(timeBox)
 
         updateClock()
+        isClickable = true
+        isFocusable = false
+        setOnClickListener {
+            fetchLiveWeatherIfNeeded(force = true)
+        }
     }
 
     override fun onAttachedToWindow() {
@@ -127,9 +132,9 @@ class WeatherTimeWidget @JvmOverloads constructor(
         dateText.text = dateFormat.format(now)
     }
 
-    fun fetchLiveWeatherIfNeeded() {
+    fun fetchLiveWeatherIfNeeded(force: Boolean = false) {
         val now = System.currentTimeMillis()
-        if (now - lastWeatherFetchTime < 30 * 60 * 1000L) return // 30 dakikada bir güncelle
+        if (!force && now - lastWeatherFetchTime < 30 * 60 * 1000L) return // 30 dakikada bir güncelle
         lastWeatherFetchTime = now
 
         worker.execute {
