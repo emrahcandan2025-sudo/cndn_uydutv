@@ -67,9 +67,18 @@ object StreamHealthManager {
         }
     }
 
+    private val ipRegex = Regex("""https?://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?(/.*)?""", RegexOption.IGNORE_CASE)
+
+    /**
+     * Verilen yayın URL'sinin doğrudan bir IP adresi (kullanıcı IP'si / yerel yayın sunucusu)
+     * içerip içermediğini denetler.
+     */
+    fun isIpStream(url: String): Boolean = ipRegex.matches(url) || ipRegex.containsMatchIn(url)
+
     /**
      * Aday yayın adreslerini sağlık ve gecikme metriklerine göre sıralar.
-     * En düşük gecikmeli ve çalışan adresler en başa gelir.
+     * Kullanıcının sağladığı doğrudan IP adresleri en yüksek öncelikle en başa alınır.
+     * Ardından en az hata alan ve en düşük gecikmeli çalışan adresler gelir.
      */
     fun orderStreams(context: Context, channelId: String, candidateUrls: List<String>): List<String> {
         if (candidateUrls.size <= 1) return candidateUrls
@@ -83,11 +92,19 @@ object StreamHealthManager {
                 val failsA = prefs.getInt(KEY_PREFIX_FAILURES + keyA, 0)
                 val failsB = prefs.getInt(KEY_PREFIX_FAILURES + keyB, 0)
 
-                // 1. Az hata alanlar öne
+                // 1. Kullanıcının doğrudan IP adresli akışları en öne (kronik hata almadıkça)
+                val isIpA = isIpStream(urlA)
+                val isIpB = isIpStream(urlB)
+                if (isIpA != isIpB) {
+                    if (isIpA && failsA < 2) return@sortedWith -1
+                    if (isIpB && failsB < 2) return@sortedWith 1
+                }
+
+                // 2. Az hata alanlar öne
                 if (failsA != failsB) {
                     failsA.compareTo(failsB)
                 } else {
-                    // 2. Düşük gecikmeli olanlar öne (kayıt yoksa Long.MAX_VALUE)
+                    // 3. Düşük gecikmeli olanlar öne (kayıt yoksa Long.MAX_VALUE)
                     val latA = prefs.getLong(KEY_PREFIX_LATENCY + keyA, Long.MAX_VALUE)
                     val latB = prefs.getLong(KEY_PREFIX_LATENCY + keyB, Long.MAX_VALUE)
                     latA.compareTo(latB)

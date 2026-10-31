@@ -78,8 +78,8 @@ object CustomPlaylistManager {
         for (urlStr in urls) {
             try {
                 val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 12000
-                    readTimeout = 18000
+                    connectTimeout = 5000
+                    readTimeout = 8000
                     requestMethod = "GET"
                     instanceFollowRedirects = true
                     setRequestProperty("User-Agent", "CNDNTV/1.0 CustomPlaylist")

@@ -216,4 +216,19 @@ class PlaylistLoaderTest {
         assertFalse("İlk yayın ce=3 bölgesel kısıtlama içermemeli", star.streamUrls[0].contains("ce=3"))
         assertTrue("İlk yayın geçerli bir hls akışı olmalı", star.streamUrls[0].contains("m3u8") || star.streamUrls[0].contains("star"))
     }
+
+    @Test
+    fun testIpStreamPrioritization() {
+        val domainStream = "https://cdn.example.com/live/trt1.m3u8"
+        val ipStream = "http://192.168.1.100:8000/live/trt1.m3u8"
+        val ch1 = TvChannel(1, "ch1", "TRT 1", streamUrl = domainStream, streamUrls = listOf(domainStream))
+        val ch2 = TvChannel(1, "ch2", "TRT 1", streamUrl = ipStream, streamUrls = listOf(ipStream))
+
+        val merged = PlaylistLoader.mergeChannelLists(listOf(listOf(ch1), listOf(ch2)))
+        val trt1 = merged.firstOrNull { it.number == 1 }
+        assertNotNull(trt1)
+        assertTrue(StreamHealthManager.isIpStream(ipStream))
+        assertFalse(StreamHealthManager.isIpStream(domainStream))
+        assertEquals(ipStream, trt1?.streamUrls?.firstOrNull())
+    }
 }

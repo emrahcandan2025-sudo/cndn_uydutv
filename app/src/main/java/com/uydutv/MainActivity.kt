@@ -320,7 +320,7 @@ class MainActivity : Activity() {
                     statusText.visibility = View.VISIBLE
                     handler.postDelayed({
                         playCurrentChannel(tryNextStream = true)
-                    }, 500)
+                    }, 150)
                 } else {
                     handlePlayerError(error)
                 }
@@ -345,7 +345,7 @@ class MainActivity : Activity() {
                 } else if (playbackState == Player.STATE_BUFFERING && ChannelCatalog.playableStream(currentChannel) != null) {
                     showLoadingLogo()
                     handler.removeCallbacks(stallFallbackRunnable)
-                    handler.postDelayed(stallFallbackRunnable, 6000L)
+                    handler.postDelayed(stallFallbackRunnable, 3500L)
                 }
             }
 
@@ -372,8 +372,10 @@ class MainActivity : Activity() {
 
     /**
      * AndroidX Media3 ExoPlayer yapılandırması:
-     * Tüm yayınlar en üst sınır 720p (1280x720) olacak şekilde ayarlanır.
-     * Yayında 720p yoksa o yayındaki en yüksek çözünürlük seçilir.
+     * TV için ultra hızlı kanal açılışı (Fast Zapping):
+     * - Küçük başlangıç tamponu (400ms) ile anında oynatma.
+     * - Düşük bağlantı ve okuma zaman aşımı (4s / 6s) ile yanıt vermeyen akışları hızlı atlama.
+     * - 720p HD sınırlandırması ile düşük bant genişliğinde akıcı canlı TV deneyimi.
      */
     private fun buildPlayer(): ExoPlayer {
         val selector = DefaultTrackSelector(this).also {
@@ -381,18 +383,28 @@ class MainActivity : Activity() {
                 it.buildUponParameters()
                     .setMaxVideoSize(1280, 720)
                     .setExceedVideoConstraintsIfNecessary(true)
+                    .setAllowVideoMixedMimeTypeAdaptiveness(true)
+                    .setAllowVideoNonSeamlessAdaptiveness(true)
             )
         }
-        val meter = DefaultBandwidthMeter.Builder(this).setInitialBitrateEstimate(30_000_000L).build()
+        val meter = DefaultBandwidthMeter.Builder(this)
+            .setInitialBitrateEstimate(2_500_000L) // 2.5 Mbps: TV'de 720p akışı hemen başlatır
+            .build()
         val load = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(15_000, 60_000, 1_500, 3_000)
-            .setBackBuffer(300_000, true) // Canlı yayın için 5 dakikalık geri sarma (Time-Shift) belleği
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 2_500,
+                /* maxBufferMs = */ 15_000,
+                /* bufferForPlaybackMs = */ 400,
+                /* bufferForPlaybackAfterRebufferMs = */ 1_000
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .setBackBuffer(30_000, false) // TV cihazlarında bellek tasarrufu
             .build()
         val renderers = DefaultRenderersFactory(this).setEnableDecoderFallback(true)
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-            .setConnectTimeoutMs(15000)
-            .setReadTimeoutMs(25000)
+            .setConnectTimeoutMs(4000)
+            .setReadTimeoutMs(6000)
             .setAllowCrossProtocolRedirects(true)
         val mediaSourceFactory = DefaultMediaSourceFactory(this)
             .setDataSourceFactory(httpDataSourceFactory)
@@ -954,19 +966,30 @@ class MainActivity : Activity() {
             p.stop()
             p.clearMediaItems()
 
+            val liveConfig = MediaItem.LiveConfiguration.Builder()
+                .setMaxPlaybackSpeed(1.04f)
+                .setMinPlaybackSpeed(0.96f)
+                .setTargetOffsetMs(2000L)
+                .build()
+
             // HLS veya DASH akışı tespiti
             val mediaItem = if (stream.contains(".m3u8", ignoreCase = true) || stream.contains("m3u8", ignoreCase = true) || stream.contains("hls", ignoreCase = true)) {
                 MediaItem.Builder()
                     .setUri(stream)
                     .setMimeType(MimeTypes.APPLICATION_M3U8)
+                    .setLiveConfiguration(liveConfig)
                     .build()
             } else if (stream.contains(".mpd", ignoreCase = true)) {
                 MediaItem.Builder()
                     .setUri(stream)
                     .setMimeType(MimeTypes.APPLICATION_MPD)
+                    .setLiveConfiguration(liveConfig)
                     .build()
             } else {
-                MediaItem.fromUri(stream)
+                MediaItem.Builder()
+                    .setUri(stream)
+                    .setLiveConfiguration(liveConfig)
+                    .build()
             }
 
             p.setMediaItem(mediaItem)
@@ -1057,6 +1080,8 @@ class MainActivity : Activity() {
                 btnSwitchSourceAction.visibility = View.GONE
             }
         }
+        infoPanel.visibility = View.VISIBLE
+        infoPanel.alpha = 1.0f
         overlayVisible = true
         resetIdleTimer()
     }
@@ -1194,8 +1219,16 @@ class MainActivity : Activity() {
             if (custom.isNotEmpty()) {
                 handler.post {
                     if (isFinishing || isDestroyed) return@post
-                    ChannelCatalog.setAll(ChannelCatalog.all + custom)
-                    Log.i("MainActivity", "Özel M3U listesinden ${custom.size} kanal eklendi.")
+                    val currentChannels = ChannelCatalog.all
+                    val hadStream = ChannelCatalog.playableStream(currentChannel) != null
+                    val mergedWithCustom = PlaylistLoader.mergeChannelLists(listOf(custom, currentChannels), this@MainActivity)
+                    ChannelCatalog.setAll(mergedWithCustom)
+                    PlaylistLoader.saveMergedCache(this@MainActivity, mergedWithCustom)
+                    if (guideVisible) openGuide()
+                    if (!hadStream && ChannelCatalog.playableStream(currentChannel) != null) {
+                        playCurrentChannel()
+                    }
+                    Log.i("MainActivity", "Özel IP/M3U listesinden ${custom.size} kanal öncelikle harmanlandı.")
                 }
             }
         }
@@ -1203,7 +1236,7 @@ class MainActivity : Activity() {
 
     private fun showAddCustomM3uDialog() {
         val input = EditText(this).apply {
-            hint = "https://ornek.com/iptv_listesi.m3u"
+            hint = "http://192.168.1.50:8080/iptv.m3u"
             setSingleLine(true)
             val pad = dp(16)
             setPadding(pad, pad, pad, pad)
@@ -1214,20 +1247,23 @@ class MainActivity : Activity() {
         val savedUrls = CustomPlaylistManager.getCustomUrls(this)
         val builder = AlertDialog.Builder(this)
             .setTitle("🌐 Harici M3U / IPTV Listesi Ekle")
-            .setMessage("Kendi M3U veya M3U8 oynatma listesi URL'nizi girin. Eklenen kanallar 'Özel M3U Listesi' kategorisine eklenecektir.")
+            .setMessage("Kendi M3U veya doğrudan IP yayın listesi URL'nizi girin. Eklenen IP ve yayın adresleri en yüksek öncelikle yüklenecektir.")
             .setView(input)
-            .setPositiveButton("İndir ve Ekle") { _, _ ->
+            .setPositiveButton("İndir ve Önceliklendir") { _, _ ->
                 val url = input.text.toString().trim()
                 if (url.startsWith("http://") || url.startsWith("https://")) {
                     CustomPlaylistManager.saveCustomUrl(this, url)
-                    Toast.makeText(this, "Özel liste indiriliyor...", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Özel IP listesi indiriliyor...", Toast.LENGTH_SHORT).show()
                     runOnWorker {
                         val channels = CustomPlaylistManager.fetchCustomChannels(this)
                         handler.post {
                             if (channels.isNotEmpty()) {
-                                ChannelCatalog.setAll(ChannelCatalog.all + channels)
+                                val mergedWithCustom = PlaylistLoader.mergeChannelLists(listOf(channels, ChannelCatalog.all), this@MainActivity)
+                                ChannelCatalog.setAll(mergedWithCustom)
+                                PlaylistLoader.saveMergedCache(this@MainActivity, mergedWithCustom)
                                 if (guideVisible) openGuide()
-                                Toast.makeText(this@MainActivity, "✅ ${channels.size} özel kanal eklendi!", Toast.LENGTH_LONG).show()
+                                playCurrentChannel()
+                                Toast.makeText(this@MainActivity, "✅ ${channels.size} kanal en yüksek öncelikle eklendi!", Toast.LENGTH_LONG).show()
                             } else {
                                 Toast.makeText(this@MainActivity, "M3U listesinden kanal okunamadı. Bağlantıyı kontrol edin.", Toast.LENGTH_LONG).show()
                             }
@@ -1242,8 +1278,10 @@ class MainActivity : Activity() {
         if (savedUrls.isNotEmpty()) {
             builder.setNeutralButton("Listeleri Temizle (${savedUrls.size})") { _, _ ->
                 CustomPlaylistManager.clearAllUrls(this)
-                ChannelCatalog.setAll(ChannelCatalog.builtIn)
+                val restored = PlaylistLoader.loadCached(this) ?: ChannelCatalog.builtIn
+                ChannelCatalog.setAll(restored)
                 if (guideVisible) openGuide()
+                playCurrentChannel()
                 Toast.makeText(this, "Kayıtlı harici listeler temizlendi", Toast.LENGTH_SHORT).show()
             }
         }

@@ -233,6 +233,13 @@ object PlaylistLoader {
                 }
             }
 
+            // IP adresli akışları (kullanıcının tanımladığı doğrudan IP yayınlarını) en başa al
+            val ipStreams = allStreams.filter { StreamHealthManager.isIpStream(it) }
+            if (ipStreams.isNotEmpty()) {
+                allStreams.removeAll(ipStreams)
+                allStreams.addAll(0, ipStreams)
+            }
+
             // Gecikme ve başarı durumuna göre akışları sırala
             val sortedStreams = if (ctx != null) {
                 StreamHealthManager.orderStreams(ctx, primary.id, allStreams)
@@ -430,17 +437,28 @@ object PlaylistLoader {
     }
 
     /**
-     * Belirtilen 4 listeyi indirir (iptv-org ve diğer kaynaklar), hepsini birleştirir,
+     * Belirtilen listeleri ve kullanıcının özel IP listelerini indirir, hepsini birleştirir,
      * çoklu akış adreslerini gruplar ve önbelleğe yazar.
      */
     fun downloadAndMergeAll(ctx: Context): List<TvChannel>? {
         val downloadedLists = mutableListOf<List<TvChannel>>()
 
+        // 1. Önce kullanıcının kendi verdiği özel IPTV / IP listelerini indir ve en başa al
+        try {
+            val customChannels = CustomPlaylistManager.fetchCustomChannels(ctx)
+            if (customChannels.isNotEmpty()) {
+                downloadedLists.add(customChannels)
+                Log.i(TAG, "Kullanıcı özel listesi en öncelikli kaynak olarak dahil edildi: ${customChannels.size} kanal")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Kullanıcı özel listesi okunamadı: ${e.message}")
+        }
+
         for (urlStr in ChannelCatalog.PLAYLIST_URLS) {
             try {
                 val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 12000
-                    readTimeout = 22000
+                    connectTimeout = 6000
+                    readTimeout = 10000
                     requestMethod = "GET"
                     instanceFollowRedirects = true
                     setRequestProperty("User-Agent", "CNDNTV/1.0 AndroidTV")
